@@ -1079,6 +1079,13 @@ export default function ManagerDashboard() {
                            <SelectItem value="Ambulance">Ambulance</SelectItem>
                            <SelectItem value="Police">Police</SelectItem>
                            <SelectItem value="Truck">Truck</SelectItem>
+                           <SelectItem value="Car">Car</SelectItem>
+                           <SelectItem value="Bus">Bus</SelectItem>
+                           <SelectItem value="Van">Van</SelectItem>
+                           <SelectItem value="Motorcycle">Motorcycle</SelectItem>
+                           <SelectItem value="Fire Truck">Fire Truck</SelectItem>
+                           <SelectItem value="Taxi">Taxi</SelectItem>
+                           <SelectItem value="Auto Rickshaw">Auto Rickshaw</SelectItem>
                          </SelectContent>
                       </Select>
                     </div>
@@ -1143,6 +1150,13 @@ export default function ManagerDashboard() {
                                   <SelectItem value="Ambulance">Ambulance</SelectItem>
                                   <SelectItem value="Police">Police</SelectItem>
                                   <SelectItem value="Truck">Truck</SelectItem>
+                                  <SelectItem value="Car">Car</SelectItem>
+                                  <SelectItem value="Bus">Bus</SelectItem>
+                                  <SelectItem value="Van">Van</SelectItem>
+                                  <SelectItem value="Motorcycle">Motorcycle</SelectItem>
+                                  <SelectItem value="Fire Truck">Fire Truck</SelectItem>
+                                  <SelectItem value="Taxi">Taxi</SelectItem>
+                                  <SelectItem value="Auto Rickshaw">Auto Rickshaw</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
