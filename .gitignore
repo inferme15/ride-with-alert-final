@@ -6,4 +6,18 @@ vite.config.ts.*
 *.tar.gz
 temp/
 *.bat
-.vercel
+
+# Database
+*.db
+*.sqlite
+
+# Environment
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
