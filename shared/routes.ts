@@ -193,7 +193,22 @@ export const api = {
     assign: {
       method: 'POST' as const,
       path: '/api/trips/assign',
-      input: z.object({ driverNumber: z.string(), vehicleNumber: z.string() }),
+      input: z.object({ 
+        driverNumber: z.string(), 
+        vehicleNumber: z.string(),
+        startLocation: z.string().optional(),
+        startLatitude: z.number().optional(),
+        startLongitude: z.number().optional(),
+        endLocation: z.string().optional(),
+        endLatitude: z.number().optional(),
+        endLongitude: z.number().optional(),
+        selectedRoute: z.any().optional(),
+        routeId: z.string().optional(),
+        routeData: z.any().optional(),
+        safetyMetrics: z.any().optional(),
+        estimatedTime: z.number().optional(),
+        distance: z.number().optional()
+      }),
       responses: {
         200: z.custom<typeof trips.$inferSelect & { driver: typeof drivers.$inferSelect, vehicle: typeof vehicles.$inferSelect }>(),
         404: errorSchemas.notFound,
