@@ -59,21 +59,56 @@ export default function DriverDashboard() {
     return null;
   };
 
-  // TEMPORARY: Force your exact location for testing
+  // ENHANCED GPS DEBUGGING: Force your exact location for testing
   useEffect(() => {
-    // Set your exact coordinates immediately
+    console.log('[GPS DEBUG] Starting GPS tracking...');
+    
+    // Set your exact coordinates immediately for testing
     const yourLocation = { lat: 12.981218, lng: 77.691087 };
     console.log('[FORCE LOCATION] Setting your exact location:', yourLocation);
     setLocation(yourLocation);
     setIsRealGPS(true);
     
     if (trip?.vehicleNumber) {
+      console.log('[GPS DEBUG] Emitting location update for vehicle:', trip.vehicleNumber);
       emit(events.LOCATION_UPDATE, {
         vehicleNumber: trip.vehicleNumber,
         location: yourLocation
       });
     }
-  }, [trip?.vehicleNumber, emit]);
+    
+    // Also try to get real GPS
+    if (navigator.geolocation) {
+      console.log('[GPS DEBUG] Requesting real GPS location...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const realLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          console.log('[GPS DEBUG] Real GPS location received:', realLocation);
+          setLocation(realLocation);
+          setIsRealGPS(true);
+          
+          if (trip?.vehicleNumber) {
+            console.log('[GPS DEBUG] Emitting real GPS update for vehicle:', trip.vehicleNumber);
+            emit(events.LOCATION_UPDATE, {
+              vehicleNumber: trip.vehicleNumber,
+              location: realLocation
+            });
+          }
+        },
+        (error) => {
+          console.error('[GPS DEBUG] GPS error:', error);
+          console.log('[GPS DEBUG] Using fallback location');
+        },
+        { 
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
+        }
+      );
+    } else {
+      console.error('[GPS DEBUG] Geolocation not supported');
+    }
+  }, [trip?.vehicleNumber, emit, events]);
   useEffect(() => {
     if (!navigator.geolocation) {
       toast({ title: "GPS Error", description: "Geolocation not supported by browser", variant: "destructive" });

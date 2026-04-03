@@ -55,7 +55,11 @@ export async function registerRoutes(
     });
 
     socket.on(socketEvents.LOCATION_UPDATE, (data) => {
-      // console.log("Location update:", data); // Noisy log
+      console.log("📍 [GPS UPDATE] Location received:", {
+        vehicleNumber: data.vehicleNumber,
+        location: data.location,
+        timestamp: new Date().toISOString()
+      });
       io.emit(socketEvents.RECEIVE_LOCATION, data);
     });
 
