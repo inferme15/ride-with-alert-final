@@ -330,8 +330,13 @@ export default function ManagerDashboard() {
       // Don't show multiple popup swaps while one decision is pending.
     });
 
-    const unsubscribeLocation = subscribe(events.RECEIVE_LOCATION, (data) => {
+    const unsubscribeLocation = subscribe(events.RECEIVE_LOCATION, (data: { vehicleNumber: string; location: { lat: number; lng: number } }) => {
+      console.log('🎯 Manager Dashboard received GPS update:', data);
       // Update vehicle locations in real-time
+      setVehicleLocations(prev => ({
+        ...prev,
+        [data.vehicleNumber]: data.location
+      }));
       refetchEmergencies();
     });
 
@@ -406,20 +411,6 @@ export default function ManagerDashboard() {
 
   // Map Markers Construction
   const [vehicleLocations, setVehicleLocations] = useState<Record<string, { lat: number; lng: number }>>({});
-
-  useEffect(() => {
-    const unsubscribe = subscribe(events.RECEIVE_LOCATION, (data: { vehicleNumber: string; location: { lat: number; lng: number } }) => {
-      console.log('🎯 Manager Dashboard received GPS update:', data);
-      setVehicleLocations(prev => ({
-        ...prev,
-        [data.vehicleNumber]: data.location
-      }));
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, [subscribe, events]);
 
   // REMOVED: Vehicle simulation completely - using real GPS only
   // No automatic vehicle movement - vehicles only move when drivers send real GPS coordinates
