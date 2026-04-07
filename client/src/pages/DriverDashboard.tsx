@@ -41,11 +41,70 @@ export default function DriverDashboard() {
   const [currentRisk, setCurrentRisk] = useState<any>(null);
   const [vehicleHealth, setVehicleHealth] = useState<any>(null);
   
+  // Real-time trip progress calculation
+  const [realTripProgress, setRealTripProgress] = useState(0);
+  const [distanceTraveled, setDistanceTraveled] = useState(0);
+  const [totalRouteDistance, setTotalRouteDistance] = useState(0);
+  
   // Refs
   const webcamRef = useRef<ReactWebcam>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  // Helper function to calculate distance between two GPS points (Haversine formula)
+  const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371; // Earth's radius in kilometers
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c; // Distance in kilometers
+  };
+
+  // Calculate trip progress based on real GPS location
+  const calculateTripProgress = (currentLat: number, currentLng: number): number => {
+    if (!trip?.startLatitude || !trip?.endLatitude) return 0;
+    
+    const startLat = parseFloat(trip.startLatitude);
+    const startLng = parseFloat(trip.startLongitude);
+    const endLat = parseFloat(trip.endLatitude);
+    const endLng = parseFloat(trip.endLongitude);
+    
+    const totalDistance = calculateDistance(startLat, startLng, endLat, endLng);
+    const distanceFromStart = calculateDistance(startLat, startLng, currentLat, currentLng);
+    
+    // Update state for display
+    setTotalRouteDistance(totalDistance);
+    setDistanceTraveled(distanceFromStart);
+    
+    // Calculate progress percentage (0-100)
+    const progress = Math.min(100, Math.max(0, (distanceFromStart / totalDistance) * 100));
+    return progress;
+  };
+
+  // Fetch nearby facilities based on current GPS location
+  const fetchNearbyFacilities = async (lat: number, lng: number) => {
+    try {
+      console.log(`🏥 [FACILITIES] Fetching nearby facilities for location: ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+      
+      const response = await fetch(`/api/emergency/nearby-facilities?latitude=${lat}&longitude=${lng}`);
+      if (response.ok) {
+        const facilities = await response.json();
+        console.log(`✅ [FACILITIES] Found ${facilities.length} nearby facilities`);
+        setDriverNearbyFacilities(facilities);
+        return facilities;
+      } else {
+        console.warn('⚠️ [FACILITIES] Failed to fetch facilities:', response.status);
+        return [];
+      }
+    } catch (error) {
+      console.error('❌ [FACILITIES] Error fetching nearby facilities:', error);
+      return [];
+    }
+  };
 
   // Fetch current trip info with faster loading
   const { data: tripData, isLoading: tripLoading } = useCurrentTrip();
@@ -164,6 +223,11 @@ export default function DriverDashboard() {
         setGpsAccuracy(pos.coords.accuracy);
         setLastGpsUpdate(Date.now());
         
+        // Calculate real trip progress based on GPS location
+        const progress = calculateTripProgress(realLocation.lat, realLocation.lng);
+        setRealTripProgress(progress);
+        console.log(`📊 [TRIP PROGRESS] Real progress: ${progress.toFixed(1)}% (${distanceTraveled.toFixed(1)}km / ${totalRouteDistance.toFixed(1)}km)`);
+        
         // Determine GPS connection quality based on accuracy
         if (pos.coords.accuracy <= 10) {
           setGpsConnectionStatus('connected');
@@ -180,7 +244,10 @@ export default function DriverDashboard() {
           accuracy: pos.coords.accuracy,
           speed: pos.coords.speed || 0,
           heading: pos.coords.heading || 0,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          tripProgress: progress,
+          distanceTraveled: distanceTraveled,
+          totalDistance: totalRouteDistance
         });
       },
       (error) => {
@@ -209,7 +276,7 @@ export default function DriverDashboard() {
         setGpsConnectionStatus('connecting');
       }
     };
-  }, [trip?.vehicleNumber, emit, events, toast]);
+  }, [trip?.vehicleNumber, emit, events, toast, distanceTraveled, totalRouteDistance]);
 
   // Monitor GPS connection health
   useEffect(() => {
@@ -228,6 +295,24 @@ export default function DriverDashboard() {
 
     return () => clearInterval(checkGpsHealth);
   }, [lastGpsUpdate]);
+
+  // Fetch nearby facilities periodically based on GPS location
+  useEffect(() => {
+    if (!location || !trip?.vehicleNumber) return;
+
+    // Fetch facilities immediately when location changes
+    fetchNearbyFacilities(location.lat, location.lng);
+
+    // Set up periodic facility updates every 30 seconds
+    const facilitiesInterval = setInterval(() => {
+      if (location) {
+        console.log('🔄 [FACILITIES] Periodic update of nearby facilities...');
+        fetchNearbyFacilities(location.lat, location.lng);
+      }
+    }, 30000); // Update every 30 seconds
+
+    return () => clearInterval(facilitiesInterval);
+  }, [location?.lat, location?.lng, trip?.vehicleNumber]); // Re-run when location changes significantly
 
   // Record a fixed-length emergency clip and return as blob.
   const recordEmergencyClip = (durationMs: number = 10000): Promise<Blob | null> => {
@@ -607,7 +692,9 @@ export default function DriverDashboard() {
     const first = value.split(",")[0]?.trim();
     return first || value;
   };
-  const tripProgressPct = Math.max(0, Math.min(100, Math.round(simulationProgress * 100)));
+  
+  // Use real GPS-based progress instead of simulation
+  const tripProgressPct = Math.max(0, Math.min(100, Math.round(realTripProgress)));
   const safetyScore = Math.round(trip?.safetyMetrics?.overallSafetyScore || 0);
 
   const handleEmergencyClick = () => {
@@ -1012,6 +1099,11 @@ export default function DriverDashboard() {
                       </div>
                       <div className="w-full h-2 bg-slate-700 rounded mt-1">
                         <div className="h-2 bg-emerald-500 rounded" style={{ width: `${tripProgressPct}%` }} />
+                      </div>
+                      {/* Real GPS-based distance info */}
+                      <div className="flex justify-between text-xs text-slate-400 mt-1">
+                        <span>Traveled: {distanceTraveled.toFixed(1)} km</span>
+                        <span>Total: {totalRouteDistance.toFixed(1)} km</span>
                       </div>
                     </div>
                     <div className="mt-2 flex items-center justify-between">
