@@ -15,13 +15,33 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Fetch event
+// Fetch event - exclude API calls from caching
 self.addEventListener('fetch', (event) => {
+  // Don't cache API requests
+  if (event.request.url.includes('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  // Don't cache socket.io requests
+  if (event.request.url.includes('socket.io')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+  
+  // Cache other requests
   event.respondWith(
     caches.match(event.request)
       .then((response) => {
         // Return cached version or fetch from network
         return response || fetch(event.request);
+      })
+      .catch(() => {
+        // If both cache and network fail, return a basic response for navigation requests
+        if (event.request.mode === 'navigate') {
+          return caches.match('/');
+        }
+        throw error;
       })
   );
 });

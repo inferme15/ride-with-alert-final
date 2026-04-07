@@ -3,7 +3,8 @@ import App from "./App";
 import "./index.css";
 
 // Register Service Worker for PWA
-if ('serviceWorker' in navigator) {
+// Temporarily disable service worker to debug fetch issues
+if (false && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
       .then((registration) => {
