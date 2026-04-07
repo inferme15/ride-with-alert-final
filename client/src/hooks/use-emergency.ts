@@ -4,11 +4,18 @@ import { useToast } from "@/hooks/use-toast";
 
 export function useEmergencies() {
   return useQuery({
-    queryKey: [api.emergency.list.path],
+    queryKey: ["/api/emergencies"], // Use direct path instead of api.emergency.list.path
     queryFn: async () => {
-      const res = await fetch(api.emergency.list.path, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to fetch emergencies");
-      return api.emergency.list.responses[200].parse(await res.json());
+      console.log('🔍 [EMERGENCY HOOK] Fetching emergencies from /api/emergencies');
+      const res = await fetch("/api/emergencies", { credentials: "include" });
+      console.log('📡 [EMERGENCY HOOK] Response:', res.status, res.statusText);
+      if (!res.ok) {
+        console.error('❌ [EMERGENCY HOOK] Failed to fetch emergencies:', res.status);
+        throw new Error("Failed to fetch emergencies");
+      }
+      const data = await res.json();
+      console.log('✅ [EMERGENCY HOOK] Emergencies loaded:', data.length);
+      return data;
     },
     refetchInterval: 5000, // Poll every 5s as backup to websockets
   });
@@ -31,8 +38,8 @@ export function useTriggerEmergency() {
       }
       
       // Note: Trigger uses multipart/form-data for potential video file
-      const res = await fetch(api.emergency.trigger.path, {
-        method: api.emergency.trigger.method,
+      const res = await fetch("/api/emergency/trigger", {
+        method: "POST",
         body: formData, // FormData automatically sets correct Content-Type boundary
         credentials: "include",
       });
@@ -79,17 +86,24 @@ export function useAcknowledgeEmergency() {
 
   return useMutation({
     mutationFn: async (emergencyId: number) => {
-      const res = await fetch(api.emergency.acknowledge.path, {
-        method: api.emergency.acknowledge.method,
+      console.log('🔍 [ACK EMERGENCY] Acknowledging emergency:', emergencyId);
+      const res = await fetch("/api/emergency/acknowledge", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emergencyId }),
         credentials: "include",
       });
-      if (!res.ok) throw new Error("Failed to acknowledge emergency");
-      return api.emergency.acknowledge.responses[200].parse(await res.json());
+      console.log('📡 [ACK EMERGENCY] Response:', res.status, res.statusText);
+      if (!res.ok) {
+        console.error('❌ [ACK EMERGENCY] Failed:', res.status);
+        throw new Error("Failed to acknowledge emergency");
+      }
+      const data = await res.json();
+      console.log('✅ [ACK EMERGENCY] Success:', data);
+      return data;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [api.emergency.list.path] });
+      queryClient.invalidateQueries({ queryKey: ["/api/emergencies"] });
       toast({ title: "Acknowledged", description: "Emergency status updated." });
     },
   });
