@@ -173,12 +173,28 @@ export async function registerRoutes(
     const hospitalPhone = req.body?.hospitalPhone || HOSPITAL_PHONE;
     const customMessage = req.body?.message;
 
-    const defaultMessage = `TEST ALERT (RideWithAlert)
-This is a review/demo notification test.
-No real emergency action is required.
-Time: ${new Date().toISOString()}
+    const defaultMessage = `*TEST ALERT (RideWithAlert)*
 
-This message is for testing purposes only. Please do not panic.`;
+*This is a review/demo notification test.*
+*No real emergency action is required.*
+
+*Time :* ${new Date().toLocaleString('en-IN', { 
+  timeZone: 'Asia/Kolkata',
+  day: '2-digit',
+  month: '2-digit', 
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true
+})}
+
+*Test Details :*
+System: RideWithAlert Emergency System
+Environment: ${process.env.NODE_ENV || 'development'}
+SMS Service: Fast2SMS API
+
+*This message is for testing purposes only. Please do not panic.*`;
     const message = String(customMessage || defaultMessage);
 
     try {
@@ -1431,31 +1447,110 @@ ${facilitySection || 'No nearby facilities found'}
 🛑 *TRIP HAS BEEN STOPPED*`;
 
       // 5. SEND SMS TO POLICE AND HOSPITAL using Fast2SMS
-      // Create SHORT messages for SMS (160 char limit)
-      const policeMessage = `🚨 EMERGENCY ALERT
-Driver: ${driver.name}
-Vehicle: ${fullEmergency.vehicleNumber}
-Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}
-Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })}
-Emergency ID: ${emergencyId}
+      // Create detailed emergency messages with comprehensive information
+      
+      // Format nearby facilities for SMS
+      const formatFacilitiesForSMS = (facilities: any[], type: string) => {
+        const filtered = facilities.filter((f: any) => {
+          const facilityType = f.type?.toLowerCase();
+          if (type === 'hospitals') return facilityType === 'hospital' || facilityType === 'clinic';
+          if (type === 'polis') return facilityType === 'police';
+          if (type === 'fire') return facilityType === 'fire_station';
+          if (type === 'fuel') return facilityType === 'fuel_station';
+          return false;
+        });
+        
+        if (filtered.length === 0) return 'None nearby';
+        
+        return filtered
+          .slice(0, 3) // Limit to 3 facilities
+          .map((f: any) => `${f.name} (${f.distance}km)`)
+          .join(', ');
+      };
+
+      const hospitalsNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'hospitals');
+      const polisNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'polis');
+      const fireNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'fire');
+      const fuelNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'fuel');
+
+      const policeMessage = `*EMERGENCY ALERT TO THE POLIS CONTROL ROOM*
+
+*Driver :* ${driver.name} (${fullEmergency.driverNumber})
+*Vehicle :* ${fullEmergency.vehicleNumber} (${vehicle.vehicleType})
+*Location :* ${locationName}
+*Coordinates :* ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+*Time :* ${new Date().toLocaleString('en-IN', { 
+  timeZone: 'Asia/Kolkata',
+  day: '2-digit',
+  month: '2-digit', 
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true
+})}
+*Emergency ID :* ${emergencyId}
+
+*Medical Information :*
 Blood Group: ${driver.bloodGroup || 'Unknown'}
+Medical Conditions: ${driver.medicalConditions || 'NONE'}
+Emergency Contact: ${driver.emergencyContact || 'Not available'} (${driver.emergencyContactPhone || 'No phone'})
+
+*Nearby Emergency Resources :*
+Hospitals: ${hospitalsNearby}
+Polis: ${polisNearby}
+Fire Stations: ${fireNearby}
+Fuel Stations: ${fuelNearby}
+
+*Emergency Contacts :*
+Polis: 100 | Medical: 108 | Fire: 101
 Driver Phone: ${driver.phoneNumber}
-IMMEDIATE POLIS ASSISTANCE REQUIRED!
 
-This message is for testing purposes only. Please do not panic.`;
+*GPS Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}*
+*TRIP HAS BEEN STOPPED*
 
-      const hospitalMessage = `🚨 MEDICAL EMERGENCY
-Driver: ${driver.name}
-Vehicle: ${fullEmergency.vehicleNumber}
-Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}
-Time: ${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false })}
-Emergency ID: ${emergencyId}
+*IMMEDIATE POLIS ASSISTANCE REQUIRED !*
+
+*This message is for testing purposes only. Please do not panic.*`;
+
+      const hospitalMessage = `*MEDICAL EMERGENCY ALERT TO HOSPITAL CONTROL ROOM*
+
+*Driver :* ${driver.name} (${fullEmergency.driverNumber})
+*Vehicle :* ${fullEmergency.vehicleNumber} (${vehicle.vehicleType})
+*Location :* ${locationName}
+*Coordinates :* ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
+*Time :* ${new Date().toLocaleString('en-IN', { 
+  timeZone: 'Asia/Kolkata',
+  day: '2-digit',
+  month: '2-digit', 
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: true
+})}
+*Emergency ID :* ${emergencyId}
+
+*Medical Information :*
 Blood Group: ${driver.bloodGroup || 'Unknown'}
-Medical: ${driver.medicalConditions || 'None'}
-Driver Phone: ${driver.phoneNumber}
-IMMEDIATE MEDICAL ASSISTANCE REQUIRED!
+Medical Conditions: ${driver.medicalConditions || 'NONE'}
+Emergency Contact: ${driver.emergencyContact || 'Not available'} (${driver.emergencyContactPhone || 'No phone'})
 
-This message is for testing purposes only. Please do not panic.`;
+*Nearby Medical Resources :*
+Hospitals: ${hospitalsNearby}
+Clinics: ${formatFacilitiesForSMS(nearbyFacilities || [], 'hospitals')}
+Pharmacies: ${formatFacilitiesForSMS(nearbyFacilities || [], 'pharmacy')}
+
+*Emergency Contacts :*
+Polis: 100 | Medical: 108 | Fire: 101
+Driver Phone: ${driver.phoneNumber}
+
+*GPS Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}*
+*TRIP HAS BEEN STOPPED*
+
+*IMMEDIATE MEDICAL ASSISTANCE REQUIRED !*
+
+*This message is for testing purposes only. Please do not panic.*`;
       
       // Print exact SMS content in terminal for verification/demo.
       console.log(`\n========== POLIS SMS (Emergency ${emergencyId}) ==========\n${policeMessage}\n===========================================================\n`);
