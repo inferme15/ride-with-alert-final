@@ -117,7 +117,7 @@ export default function ManagerDashboard() {
     if (!socket) return;
 
     const handleNewEmergency = (emergency: Emergency & { driver: Driver; vehicle: Vehicle }) => {
-      console.log("New emergency received:", emergency);
+      console.log("🚨 [MANAGER] New emergency received:", emergency);
       setActiveEmergency(emergency);
       toast({
         title: "🚨 EMERGENCY ALERT",
@@ -128,14 +128,15 @@ export default function ManagerDashboard() {
     };
 
     const handleEmergencyAcknowledged = (data: any) => {
-      console.log("Emergency acknowledged:", data);
+      console.log("✅ [MANAGER] Emergency acknowledged:", data);
       if (activeEmergency && data.emergencyId === activeEmergency.emergencyId) {
         setActiveEmergency(null);
       }
       refetchEmergencies();
     };
 
-    const unsubscribeEmergency = subscribe(events.NEW_EMERGENCY, handleNewEmergency);
+    // Use RECEIVE_EMERGENCY event (this is what the server actually emits)
+    const unsubscribeEmergency = subscribe(events.RECEIVE_EMERGENCY, handleNewEmergency);
     const unsubscribeAck = subscribe(events.EMERGENCY_ACKNOWLEDGED, handleEmergencyAcknowledged);
 
     return () => {
@@ -310,39 +311,10 @@ export default function ManagerDashboard() {
   // };
 
   useEffect(() => {
-    // Listen for new emergencies via WebSocket
-    const unsubscribeEmergency = subscribe(events.RECEIVE_EMERGENCY, (data) => {
-      console.log("🚨 Emergency received:", data);
-      
-      // Keep popup open and update same emergency data in place.
-      setActiveEmergency((prev) => {
-        if (!prev) return data;
-        if (
-          prev.emergencyId === data.emergencyId ||
-          (prev.driverNumber === data.driverNumber && prev.vehicleNumber === data.vehicleNumber)
-        ) {
-          return { ...prev, ...data };
-        }
-        return prev;
-      });
-      
-      // Only show toast notification, not multiple popups
-      toast({
-        title: "🚨 EMERGENCY ALERT",
-        description: `Driver ${data.driver?.name} (${data.vehicleNumber}) needs immediate review`,
-        duration: 10000,
-        variant: "destructive"
-      });
-      
-      refetchEmergencies();
-      
-      // Pause vehicle simulation
-      if (data.vehicleNumber) {
-        setPausedVehicles(prev => new Set(prev).add(data.vehicleNumber));
-      }
-      
-      // Don't show multiple popup swaps while one decision is pending.
-    });
+    // REMOVED: Duplicate emergency listener - handled in separate useEffect above
+    // const unsubscribeEmergency = subscribe(events.RECEIVE_EMERGENCY, (data) => {
+    // REMOVED: Duplicate emergency handling code
+    // ... emergency handling logic moved to separate useEffect above ...
 
     const unsubscribeLocation = subscribe(events.RECEIVE_LOCATION, (data: { 
       vehicleNumber: string; 
@@ -418,7 +390,7 @@ export default function ManagerDashboard() {
     });
     
     return () => {
-      unsubscribeEmergency?.();
+      // unsubscribeEmergency?.(); // REMOVED: Duplicate emergency listener
       unsubscribeLocation?.();
       unsubscribeStopAlarm?.();
       unsubscribeTripCompleted?.();
