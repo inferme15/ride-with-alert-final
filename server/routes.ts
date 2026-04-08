@@ -1305,9 +1305,6 @@ Thank you for your service. 🙏`;
             status: 'ACTIVE'
           });
           console.log(`[SOCKET EMIT - UPDATED] Emergency updated with facilities and location`);
-
-          // NO automatic email sending - wait for manager decision
-          console.log('📧 Emergency created - waiting for manager decision (real vs false alarm)');
         } catch (error) {
           console.error("[BACKGROUND] Error fetching facilities/location:", error);
         }
@@ -1451,6 +1448,22 @@ Thank you for your service. 🙏`;
       res.status(500).json({ message: "Failed to process real emergency" });
     }
   });
+
+  // NEW: Manager approves emergency and sends to police/hospital
+  app.post("/api/emergency/approve", async (req, res) => {
+    const { emergencyId, nearbyFacilities: facilitiesFromManager } = req.body;
+    try {
+      const fullEmergency = await storage.getEmergencyWithRelations(emergencyId);
+      
+      if (!fullEmergency) {
+        return res.status(404).json({ message: "Emergency not found" });
+      }
+
+      const { driver, vehicle, locationName } = fullEmergency;
+      const latitude = parseFloat(String(fullEmergency.latitude));
+      const longitude = parseFloat(String(fullEmergency.longitude));
+
+      // Mark this emergency flow as acknowledged/handled before escalation.
       await storage.updateEmergencyStatus(emergencyId, "ACKNOWLEDGED");
       await storage.updateAllActiveEmergenciesForDriverVehicle(
         fullEmergency.driverNumber,
