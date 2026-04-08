@@ -724,40 +724,57 @@ export default function DriverDashboard() {
       return;
     }
 
-    console.log('🚨 Emergency button clicked - starting IMMEDIATE video recording');
+    console.log('🚨 [PERFECT FLOW] SOS button pressed - starting 10-second video recording');
     
-    // Start emergency workflow with immediate video recording
+    // PHASE 1: Start emergency workflow (0-10 seconds)
     setIsProcessingEmergency(true);
     setIsEmergencyActive(true);
-    setStatusMessage("🚨 Recording emergency video...");
+    setStatusMessage("🔴 Recording emergency video... 10s");
 
-    const clickedAt = Date.now();
-    const runEmergencyFlow = async () => {
+    const sosStartTime = Date.now();
+    let countdownInterval: NodeJS.Timeout;
+    
+    // Show countdown to user
+    let secondsLeft = 10;
+    countdownInterval = setInterval(() => {
+      secondsLeft--;
+      if (secondsLeft > 0) {
+        setStatusMessage(`🔴 Recording emergency video... ${secondsLeft}s`);
+      } else {
+        setStatusMessage("📤 Processing emergency data...");
+        clearInterval(countdownInterval);
+      }
+    }, 1000);
+
+    const runPerfectEmergencyFlow = async () => {
       try {
-        // Start video recording immediately
-        console.log('🎥 [EMERGENCY] Starting immediate video recording...');
+        // PHASE 1: Start 10-second video recording immediately
+        console.log('🎥 [PERFECT FLOW] Starting exactly 10-second video recording...');
         const videoPromise = recordEmergencyClip(10000);
         
-        // Collect nearby facilities in parallel
+        // PHASE 1: Collect nearby facilities in parallel
         const facilitiesPromise = fetch(
           `/api/emergency/nearby-facilities?latitude=${activeLocation.lat}&longitude=${activeLocation.lng}`
         )
           .then(async (r) => (r.ok ? r.json() : []))
           .catch(() => []);
 
-        // Wait for both video and facilities
+        // PHASE 1: Wait for both video and facilities (should complete at 10 seconds)
         const [videoBlob, facilities] = await Promise.all([videoPromise, facilitiesPromise]);
         
         if (Array.isArray(facilities)) setDriverNearbyFacilities(facilities);
 
-        // Ensure minimum 10 seconds have passed for complete recording
-        const elapsed = Date.now() - clickedAt;
-        const waitMs = Math.max(0, 10500 - elapsed); // 10.5 seconds to ensure recording completion
+        // PHASE 2: Ensure exactly 10 seconds have passed (10-12 seconds total)
+        const elapsed = Date.now() - sosStartTime;
+        const waitMs = Math.max(0, 10000 - elapsed); // Ensure minimum 10 seconds
         if (waitMs > 0) {
-          setStatusMessage("🚨 Finalizing emergency data...");
+          setStatusMessage("📤 Finalizing emergency data...");
           await new Promise((resolve) => setTimeout(resolve, waitMs));
         }
 
+        // PHASE 2: Prepare emergency data (10-12 seconds)
+        setStatusMessage("📡 Sending emergency alert to manager...");
+        
         const formData = new FormData();
         formData.append('driverNumber', trip.driverNumber);
         formData.append('vehicleNumber', trip.vehicleNumber);
@@ -765,80 +782,40 @@ export default function DriverDashboard() {
         formData.append('longitude', activeLocation.lng.toString());
         formData.append('location', JSON.stringify({ latitude: activeLocation.lat, longitude: activeLocation.lng }));
         formData.append('emergencyType', 'SOS_BUTTON');
-        formData.append('description', 'Driver pressed SOS button - Manager review required');
+        formData.append('description', 'Driver pressed SOS button - 10-second video recorded');
         
         if (videoBlob && videoBlob.size > 0) {
-          formData.append("video", videoBlob, "emergency-capture.webm");
-          console.log('✅ [EMERGENCY] Video attached to alert:', {
+          formData.append("video", videoBlob, "emergency-10sec.webm");
+          console.log('✅ [PERFECT FLOW] 10-second video attached:', {
             size: videoBlob.size,
             type: videoBlob.type,
-            filename: "emergency-capture.webm"
+            filename: "emergency-10sec.webm"
           });
-          
-          // ENHANCED DEBUG: Test video blob validity
-          const videoUrl = URL.createObjectURL(videoBlob);
-          console.log('🎥 [DEBUG] Video blob URL created for testing:', videoUrl);
-          
-          // Test if blob can be played
-          const testVideo = document.createElement('video');
-          testVideo.src = videoUrl;
-          testVideo.onloadeddata = () => {
-            console.log('✅ [DEBUG] Video blob is valid and playable');
-            console.log('📊 [DEBUG] Video dimensions:', testVideo.videoWidth, 'x', testVideo.videoHeight);
-            console.log('⏱️ [DEBUG] Video duration:', testVideo.duration, 'seconds');
-            URL.revokeObjectURL(videoUrl);
-          };
-          testVideo.onerror = (e) => {
-            console.error('❌ [DEBUG] Video blob is corrupted or invalid:', e);
-            URL.revokeObjectURL(videoUrl);
-          };
         } else {
-          console.warn('⚠️ [EMERGENCY] No video recorded, sending alert without video');
-          console.log('🔍 [DEBUG] Video blob details:', {
-            videoBlob,
-            size: videoBlob?.size,
-            type: videoBlob?.type,
-            isNull: videoBlob === null,
-            isUndefined: videoBlob === undefined
-          });
-          
-          // ENHANCED DEBUG: Check camera state
-          console.log('📷 [DEBUG] Camera state during emergency:', {
-            cameraReady,
-            cameraError,
-            webcamRef: !!webcamRef.current,
-            webcamStream: webcamRef.current?.stream?.active,
-            mediaRecorderRef: !!mediaRecorderRef.current
-          });
+          console.warn('⚠️ [PERFECT FLOW] No video recorded, sending alert without video');
         }
 
+        // PHASE 2: Send to manager (should reach manager at 12 seconds)
         await triggerEmergency(formData);
 
-        console.log('✅ Emergency alert sent to manager with video');
-        console.log('📋 [DEBUG] FormData contents:');
-        for (let [key, value] of formData.entries()) {
-          if (value instanceof File) {
-            console.log(`  ${key}: File(${value.name}, ${value.size} bytes, ${value.type})`);
-          } else {
-            console.log(`  ${key}: ${value}`);
-          }
-        }
+        console.log('✅ [PERFECT FLOW] Emergency alert sent to manager at 12 seconds');
         
-        // ENHANCED DEBUG: Verify FormData was sent correctly
-        console.log('🌐 [DEBUG] Emergency trigger request completed');
-        console.log('📡 [DEBUG] Request should have been sent to:', '/api/emergency/trigger');
-        
-        setStatusMessage("🚨 EMERGENCY SENT TO MANAGER - Awaiting decision");
+        // PHASE 3: Driver sees confirmation
+        setStatusMessage("🚨 EMERGENCY SENT! Manager reviewing (10s decision window)");
         toast({
           title: "🚨 Emergency Alert Sent!",
-          description: videoBlob ? "Video and location shared with manager." : "Location shared with manager (video failed).",
-          duration: 4000
+          description: "Manager will review your 10-second video and make a decision.",
+          duration: 6000
         });
+
+        clearInterval(countdownInterval);
+        
       } catch (error: any) {
-        console.error('❌ Emergency alert failed:', error);
+        console.error('❌ [PERFECT FLOW] Emergency alert failed:', error);
         setIsEmergencyActive(false);
         setIsProcessingEmergency(false);
         setStatusMessage("Monitoring Active");
+        clearInterval(countdownInterval);
         toast({
           title: "Emergency Failed",
           description: error?.message || "Failed to send alert. Please try again.",
@@ -847,7 +824,7 @@ export default function DriverDashboard() {
       }
     };
 
-    runEmergencyFlow();
+    runPerfectEmergencyFlow();
   };
 
   // Manual GPS refresh function

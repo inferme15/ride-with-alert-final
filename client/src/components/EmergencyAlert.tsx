@@ -103,23 +103,26 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
     };
   }, [emergency?.emergencyId, emergency?.status, isOpen, onClose]); // More specific dependencies
 
-  // Deterministic decision window:
-  // SOS pipeline sends manager alert at ~11s.
-  // Manager decision is enabled at ~23s => 12s after popup opens.
+  // Perfect 10-second decision countdown as per requirements
   useEffect(() => {
     if (!emergency || emergency.status !== "ACTIVE" || !isOpen) {
       setDecisionCountdown(0);
       return;
     }
 
-    const unlockAt = Date.now() + 12000;
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((unlockAt - Date.now()) / 1000));
-      setDecisionCountdown(remaining);
-    };
+    // Start with 10 seconds countdown
+    setDecisionCountdown(10);
+    
+    const intervalId = setInterval(() => {
+      setDecisionCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(intervalId);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
 
-    tick();
-    const intervalId = setInterval(tick, 1000);
     return () => clearInterval(intervalId);
   }, [emergency?.emergencyId, emergency?.status, isOpen]);
 
@@ -268,17 +271,21 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
             <AlertTriangle className="w-12 h-12 animate-bounce" />
             <div>
               <DialogTitle className="text-3xl font-black uppercase tracking-wider">
-                Emergency Alert!
+                🚨 EMERGENCY ALERT
               </DialogTitle>
               <DialogDescription className="text-lg font-medium text-red-500">
-                Immediate attention required for Vehicle {emergency.vehicle.vehicleNumber}
+                Driver: {emergency.driver.name} | Vehicle: {emergency.vehicle.vehicleNumber} ({emergency.vehicle.vehicleType})
               </DialogDescription>
               <div className="mt-2 text-sm font-semibold">
                 {isAlarmPlaying ? "🔊 Alarm Active" : "🔇 Alarm Muted"}
               </div>
-              {decisionCountdown > 0 && (
-                <div className="mt-1 text-sm font-semibold text-amber-700">
-                  Decision enabled in {decisionCountdown}s
+              {decisionCountdown > 0 ? (
+                <div className="mt-1 text-lg font-bold text-amber-700 bg-amber-100 px-3 py-1 rounded-full inline-block">
+                  Decision in {decisionCountdown}s
+                </div>
+              ) : (
+                <div className="mt-1 text-lg font-bold text-green-700 bg-green-100 px-3 py-1 rounded-full inline-block">
+                  ✅ Decision Enabled
                 </div>
               )}
             </div>
@@ -289,18 +296,21 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
           <div className="space-y-4">
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
               <h4 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
-                <MapPin className="w-4 h-4" /> Location
+                <MapPin className="w-4 h-4" /> GPS Location
               </h4>
               {(emergency as any).locationName && (
                 <p className="text-base font-semibold text-slate-800 mb-2">
-                  {(emergency as any).locationName}
+                  📍 {(emergency as any).locationName}
                 </p>
               )}
-              <p className="text-sm text-slate-600 font-mono">
-                Lat: {parseFloat(String(emergency.latitude)).toFixed(6)}
-                <br />
-                Lng: {parseFloat(String(emergency.longitude)).toFixed(6)}
-              </p>
+              <div className="bg-white p-2 rounded border font-mono text-sm">
+                <div className="text-slate-600">
+                  <strong>Latitude:</strong> {parseFloat(String(emergency.latitude)).toFixed(6)}
+                </div>
+                <div className="text-slate-600">
+                  <strong>Longitude:</strong> {parseFloat(String(emergency.longitude)).toFixed(6)}
+                </div>
+              </div>
             </div>
 
             <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
@@ -382,84 +392,73 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
           </div>
 
           <div className="space-y-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() => setShowVideoSection((prev) => !prev)}
-            >
-              {showVideoSection ? "Hide Video Section" : "Show Video Section"}
-            </Button>
-            {showVideoSection && (
-              <div className="bg-black rounded-xl overflow-hidden aspect-video relative flex items-center justify-center group">
-                {emergency.videoUrl ? (
-              <>
-                <video 
-                  src={emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`}
-                  controls
-                  autoPlay
-                  muted
-                  playsInline
-                  preload="auto"
-                  className="w-full h-full object-contain"
-                  onError={(e) => {
-                    console.error("❌ [VIDEO DISPLAY] Video playback error:", e);
-                    console.log("🔍 [VIDEO DEBUG] Video URL:", emergency.videoUrl);
-                    console.log("🔍 [VIDEO DEBUG] Full URL:", emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
-                    console.log("🔍 [VIDEO DEBUG] Emergency object:", emergency);
-                  }}
-                  onLoadStart={() => {
-                    console.log("📺 [VIDEO DISPLAY] Video loading started");
-                    console.log("🔍 [VIDEO DEBUG] Loading URL:", emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
-                  }}
-                  onLoadedData={() => {
-                    console.log("✅ [VIDEO DISPLAY] Video data loaded successfully");
-                  }}
-                  onCanPlay={() => {
-                    console.log("▶️ [VIDEO DISPLAY] Video can play");
-                  }}
-                  onLoadedMetadata={(e) => {
-                    const video = e.target as HTMLVideoElement;
-                    console.log("📊 [VIDEO DISPLAY] Video metadata loaded:", {
-                      duration: video.duration,
-                      videoWidth: video.videoWidth,
-                      videoHeight: video.videoHeight,
-                      readyState: video.readyState
-                    });
-                  }}
-                >
-                  <source 
+            <div className="bg-black rounded-xl overflow-hidden aspect-video relative flex items-center justify-center group">
+              {emergency.videoUrl ? (
+                <>
+                  <video 
                     src={emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`}
-                    type="video/webm"
-                  />
-                  Your browser does not support the video tag.
-                </video>
-                <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                  <Video className="w-3 h-3 inline mr-1" />
-                  Emergency Recording
+                    controls
+                    autoPlay
+                    muted={false}
+                    playsInline
+                    preload="auto"
+                    className="w-full h-full object-contain"
+                    onError={(e) => {
+                      console.error("❌ [VIDEO DISPLAY] Video playback error:", e);
+                      console.log("🔍 [VIDEO DEBUG] Video URL:", emergency.videoUrl);
+                      console.log("🔍 [VIDEO DEBUG] Full URL:", emergency.videoUrl ? (emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`) : 'No URL');
+                      console.log("🔍 [VIDEO DEBUG] Emergency object:", emergency);
+                    }}
+                    onLoadStart={() => {
+                      console.log("📺 [VIDEO DISPLAY] Video loading started");
+                      console.log("🔍 [VIDEO DEBUG] Loading URL:", emergency.videoUrl ? (emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`) : 'No URL');
+                    }}
+                    onLoadedData={() => {
+                      console.log("✅ [VIDEO DISPLAY] Video data loaded successfully");
+                    }}
+                    onCanPlay={() => {
+                      console.log("▶️ [VIDEO DISPLAY] Video can play");
+                    }}
+                    onLoadedMetadata={(e) => {
+                      const video = e.target as HTMLVideoElement;
+                      console.log("📊 [VIDEO DISPLAY] Video metadata loaded:", {
+                        duration: video.duration,
+                        videoWidth: video.videoWidth,
+                        videoHeight: video.videoHeight,
+                        readyState: video.readyState
+                      });
+                    }}
+                  >
+                    <source 
+                      src={emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`}
+                      type="video/webm"
+                    />
+                    Your browser does not support the video tag.
+                  </video>
+                  <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                    <Video className="w-3 h-3 inline mr-1" />
+                    10-Second Emergency Recording
+                  </div>
+                </>
+              ) : (
+                <div className="text-white text-center">
+                  <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-red-500 animate-spin mx-auto mb-4" />
+                  <p className="text-sm font-semibold">Processing 10-second video...</p>
+                  <div className="w-40 h-2 rounded bg-white/20 mx-auto mt-3">
+                    <div className="h-2 w-2/3 bg-red-500 rounded animate-pulse" />
+                  </div>
+                  <div className="text-xs text-gray-400 mt-2">
+                    Video upload in progress
+                  </div>
                 </div>
-              </>
-            ) : (
-              <div className="text-white text-center">
-                <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-red-500 animate-spin mx-auto mb-4" />
-                <p className="text-sm font-semibold">Recording 30s... collecting evidence</p>
-                <div className="w-40 h-2 rounded bg-white/20 mx-auto mt-3">
-                  <div className="h-2 w-2/3 bg-red-500 rounded animate-pulse" />
+              )}
+              
+              {emergency.status === "ACTIVE" && (
+                <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse">
+                  🔴 LIVE EMERGENCY
                 </div>
-                <div className="text-xs text-gray-400 mt-2">
-                  {console.log("⚠️ [VIDEO DEBUG] No video URL available:", { emergency, videoUrl: emergency.videoUrl })}
-                  Debug: No video URL in emergency data
-                </div>
-              </div>
-            )}
-            
-            {emergency.status === "ACTIVE" && (
-              <div className="absolute top-2 right-2 bg-red-600 text-white text-xs font-bold px-2 py-1 rounded animate-pulse">
-                LIVE
-              </div>
-            )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
