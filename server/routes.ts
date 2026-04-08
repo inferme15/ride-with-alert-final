@@ -1904,6 +1904,16 @@ Driver Phone: ${driver.phoneNumber}
         [76.9558, 11.0168]  // Coimbatore
       ];
 
+      const drivers = await storage.getAllDrivers();
+      const vehicles = await storage.getAllVehicles();
+      const defaultDriver = drivers[0];
+      const defaultVehicle = vehicles[0];
+
+      if (!defaultDriver || !defaultVehicle) {
+        console.log('[STARTUP TEST] Skipping test trip creation: no driver/vehicle available');
+        return;
+      }
+
       // Check if test trip already exists
       const existingTrips = await storage.getAllTrips();
       const hasTestTrip = existingTrips.some(trip => trip.startLocation === "Bangalore" && trip.endLocation === "Coimbatore");
@@ -1912,8 +1922,8 @@ Driver Phone: ${driver.phoneNumber}
         const { temporaryUsername, temporaryPassword } = generateTemporaryCredentials();
 
         const trip = await storage.createTrip({
-          driverNumber: "d1",
-          vehicleNumber: "v1", 
+          driverNumber: defaultDriver.driverNumber,
+          vehicleNumber: defaultVehicle.vehicleNumber,
           temporaryUsername,
           temporaryPassword,
           startLocation: "Bangalore",
