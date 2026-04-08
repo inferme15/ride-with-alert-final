@@ -1,13 +1,20 @@
 import nodemailer from 'nodemailer';
 import type { Driver, Emergency, Trip, Vehicle, NearbyFacility } from '../shared/schema';
 
-// QUICK FIX: Use correct nodemailer import
+// FORCE IPv4 to fix Gmail SMTP connectivity issues
+import dns from 'dns';
+dns.setDefaultResultOrder('ipv4first');
+
+// Gmail SMTP configuration with IPv4 fix
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER?.trim().replace(/\\n/g, '').replace(/\n/g, ''),
     pass: process.env.EMAIL_APP_PASSWORD?.trim().replace(/\\n/g, '').replace(/\n/g, ''),
-  }
+  },
+  family: 4 // Force IPv4
 });
 
 // Email templates
