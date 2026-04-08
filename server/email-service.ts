@@ -1,19 +1,41 @@
 import * as nodemailer from 'nodemailer';
 import type { Driver, Emergency, Trip, Vehicle, NearbyFacility } from '../shared/schema';
 
-// Email configuration
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Use STARTTLS
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD,
-  },
-  tls: {
-    rejectUnauthorized: false
-  }
-});
+// Email configuration with fallback
+let transporter: nodemailer.Transporter;
+
+// Try SSL first (port 465), then fallback to STARTTLS (port 587)
+const createTransporter = () => {
+  const emailUser = process.env.EMAIL_USER?.trim().replace(/\\n/g, '').replace(/\n/g, '');
+  const emailPassword = process.env.EMAIL_APP_PASSWORD?.trim().replace(/\\n/g, '').replace(/\n/g, '');
+  
+  console.log('📧 Creating email transporter with:', {
+    user: emailUser,
+    hasPassword: !!emailPassword,
+    userLength: emailUser?.length,
+    passwordLength: emailPassword?.length,
+    rawUser: process.env.EMAIL_USER
+  });
+
+  // Primary configuration: SSL on port 465
+  return nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true, // Use SSL
+    auth: {
+      user: emailUser,
+      pass: emailPassword,
+    },
+    tls: {
+      rejectUnauthorized: false
+    },
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 5000, // 5 seconds
+    socketTimeout: 10000, // 10 seconds
+  });
+};
+
+transporter = createTransporter();
 
 // Email templates
 export class EmailService {
@@ -31,11 +53,21 @@ export class EmailService {
       return;
     }
 
+    const emailUser = process.env.EMAIL_USER?.trim().replace(/\\n/g, '');
+    const driverEmail = driver.email?.trim();
+
     console.log('📧 Email config check:', {
-      emailUser: process.env.EMAIL_USER,
+      emailUser: emailUser,
       hasPassword: !!process.env.EMAIL_APP_PASSWORD,
-      driverEmail: driver.email
+      driverEmail: driverEmail,
+      emailUserRaw: process.env.EMAIL_USER
     });
+
+    // Validate email addresses
+    if (!emailUser || !driverEmail) {
+      console.error('❌ Invalid email configuration:', { emailUser, driverEmail });
+      return;
+    }
 
     const routeMapUrl = routeData 
       ? `https://www.google.com/maps/dir/${trip.startLatitude},${trip.startLongitude}/${trip.endLatitude},${trip.endLongitude}`
@@ -101,25 +133,49 @@ export class EmailService {
     `;
 
     const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: driver.email,
+      from: emailUser,
+      to: driverEmail,
       subject: `🚛 Trip Assignment - ${trip.tripId}`,
       html: htmlContent,
     };
 
     try {
-      console.log('📧 Attempting to send email to:', driver.email);
+      console.log('📧 Attempting to send email to:', driverEmail);
+      console.log('📧 From address:', emailUser);
       const result = await transporter.sendMail(mailOptions);
       console.log('✅ Trip assignment email sent successfully:', result.messageId);
     } catch (error) {
       console.error('❌ Error sending trip assignment email:', error);
       console.error('📧 Email config debug:', {
         host: 'smtp.gmail.com',
-        port: 587,
-        user: process.env.EMAIL_USER,
-        hasPassword: !!process.env.EMAIL_APP_PASSWORD
+        port: 465,
+        user: emailUser,
+        hasPassword: !!process.env.EMAIL_APP_PASSWORD,
+        driverEmail: driverEmail
       });
-      throw error;
+      
+      // Try fallback configuration with port 587
+      console.log('🔄 Trying fallback SMTP configuration...');
+      try {
+        const fallbackTransporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 587,
+          secure: false, // Use STARTTLS
+          auth: {
+            user: emailUser,
+            pass: process.env.EMAIL_APP_PASSWORD?.trim(),
+          },
+          tls: {
+            rejectUnauthorized: false
+          }
+        });
+        
+        const fallbackResult = await fallbackTransporter.sendMail(mailOptions);
+        console.log('✅ Trip assignment email sent via fallback:', fallbackResult.messageId);
+      } catch (fallbackError) {
+        console.error('❌ Fallback email also failed:', fallbackError);
+        throw error; // Throw original error
+      }
     }
   }
 
