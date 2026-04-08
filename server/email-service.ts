@@ -1,8 +1,8 @@
-import * as nodemailer from 'nodemailer';
+import nodemailer from 'nodemailer';
 import type { Driver, Emergency, Trip, Vehicle, NearbyFacility } from '../shared/schema';
 
-// QUICK FIX: Use Gmail service with better error handling
-const transporter = nodemailer.createTransporter({
+// QUICK FIX: Use correct nodemailer import
+const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER?.trim().replace(/\\n/g, '').replace(/\n/g, ''),
