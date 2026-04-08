@@ -31,13 +31,13 @@ export function useTriggerEmergency() {
       // ENHANCED DEBUG: Log FormData contents before sending
       console.log('🚀 [EMERGENCY HOOK] Sending emergency request...');
       console.log('📋 [EMERGENCY HOOK] FormData contents:');
-      for (let [key, value] of formData.entries()) {
+      formData.forEach((value, key) => {
         if (value instanceof File) {
           console.log(`  ${key}: File(${value.name}, ${value.size} bytes, ${value.type})`);
         } else {
           console.log(`  ${key}: ${value}`);
         }
-      }
+      });
       
       // Note: Trigger uses multipart/form-data for potential video file
       const res = await fetch("/api/emergency/trigger", {

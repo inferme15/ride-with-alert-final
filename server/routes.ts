@@ -47,8 +47,7 @@ const upload = multer({
     if (file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      console.warn('⚠️ [MULTER] Rejected non-video file:', file.mimetype);
-      cb(new Error('Only video files are allowed'), false);
+      cb(new Error('Only video files are allowed') as any, false);
     }
   }
 });
@@ -1746,7 +1745,7 @@ Driver Phone: ${driver.phoneNumber}
       
       const emergenciesPromise = storage.getAllEmergencies();
       
-      const emergencies = await Promise.race([emergenciesPromise, timeoutPromise]);
+      const emergencies = (await Promise.race([emergenciesPromise, timeoutPromise])) as any[];
       
       const duration = Date.now() - startTime;
       console.log(`[EMERGENCIES] Fetched ${emergencies.length} emergencies in ${duration}ms`);

@@ -30,7 +30,8 @@ export default function ManagerDashboard() {
   const { data: availableVehicles } = useAvailableVehicles();
   const { data: availableDrivers } = useAvailableDrivers();
   const { data: trips, refetch: refetchTrips } = useTrips();
-  const { data: emergencies, refetch: refetchEmergencies } = useEmergencies();
+  const { data: rawEmergencies, refetch: refetchEmergencies } = useEmergencies();
+  const emergencies = rawEmergencies as (Emergency & { driver: Driver; vehicle: Vehicle })[] | undefined;
 
   // Debug logging
   console.log('[DEBUG] Manager Dashboard - Data state:', {
@@ -339,6 +340,29 @@ export default function ManagerDashboard() {
           lastUpdate: Date.now()
         }
       }));
+      
+      // Dynamically fetch nearby facilities to match the live driver movement
+      // Throttle to avoid excessive API calls (only fetch once every 30 seconds per vehicle)
+      const now = Date.now();
+      const lastFetch = facilitiesFetchAtRef.current[data.vehicleNumber] || 0;
+      if (now - lastFetch > 30000) {
+        facilitiesFetchAtRef.current[data.vehicleNumber] = now;
+        fetch(`/api/emergency/nearby-facilities?latitude=${data.location.lat}&longitude=${data.location.lng}`)
+          .then(res => {
+            if (res.ok) return res.json();
+            return null;
+          })
+          .then(facilities => {
+            if (facilities && Array.isArray(facilities)) {
+              setLiveNearbyFacilitiesByVehicle(prev => ({
+                ...prev,
+                [data.vehicleNumber]: facilities
+              }));
+              console.log(`🏥 [FACILITIES] Manager Dash dynamically updated facilities for ${data.vehicleNumber}`);
+            }
+          })
+          .catch(err => console.error('Failed to update live facilities on Manager Dash:', err));
+      }
       
       // Update vehicle tracking status
       setVehicleTrackingStatus(prev => ({

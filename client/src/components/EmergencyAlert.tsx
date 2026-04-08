@@ -405,12 +405,12 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
                   onError={(e) => {
                     console.error("❌ [VIDEO DISPLAY] Video playback error:", e);
                     console.log("🔍 [VIDEO DEBUG] Video URL:", emergency.videoUrl);
-                    console.log("🔍 [VIDEO DEBUG] Full URL:", emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
+                    console.log("🔍 [VIDEO DEBUG] Full URL:", emergency.videoUrl?.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
                     console.log("🔍 [VIDEO DEBUG] Emergency object:", emergency);
                   }}
                   onLoadStart={() => {
                     console.log("📺 [VIDEO DISPLAY] Video loading started");
-                    console.log("🔍 [VIDEO DEBUG] Loading URL:", emergency.videoUrl.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
+                    console.log("🔍 [VIDEO DEBUG] Loading URL:", emergency.videoUrl?.startsWith('http') ? emergency.videoUrl : `${window.location.origin}${emergency.videoUrl}`);
                   }}
                   onLoadedData={() => {
                     console.log("✅ [VIDEO DISPLAY] Video data loaded successfully");
@@ -447,7 +447,7 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
                   <div className="h-2 w-2/3 bg-red-500 rounded animate-pulse" />
                 </div>
                 <div className="text-xs text-gray-400 mt-2">
-                  {console.log("⚠️ [VIDEO DEBUG] No video URL available:", { emergency, videoUrl: emergency.videoUrl })}
+                  {(() => { console.log("⚠️ [VIDEO DEBUG] No video URL available:", { emergency, videoUrl: emergency.videoUrl }); return null; })()}
                   Debug: No video URL in emergency data
                 </div>
               </div>

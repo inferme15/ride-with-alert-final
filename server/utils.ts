@@ -194,6 +194,7 @@ export interface NearbyFacility {
   address: string;
   isOpen24Hours: boolean;
   controlRoomNumber?: string;
+  source?: string;
 }
 
 /**

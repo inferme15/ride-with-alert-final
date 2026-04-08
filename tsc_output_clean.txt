@@ -1,0 +1,28 @@
+
+> rest-express@1.0.0 check
+> tsc
+
+client/src/components/EmergencyAlert.tsx(408,63): error TS18047: 'emergency.videoUrl' is possibly 'null'.
+client/src/components/EmergencyAlert.tsx(413,66): error TS18047: 'emergency.videoUrl' is possibly 'null'.
+client/src/components/EmergencyAlert.tsx(450,19): error TS2322: Type 'void' is not assignable to type 'ReactNode'.
+client/src/hooks/use-emergency.ts(34,32): error TS2802: Type 'FormDataIterator<[string, FormDataEntryValue]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+client/src/pages/DriverDashboard.tsx(72,33): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+client/src/pages/DriverDashboard.tsx(74,31): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+  Type 'null' is not assignable to type 'string'.
+client/src/pages/DriverDashboard.tsx(819,34): error TS2802: Type 'FormDataIterator<[string, FormDataEntryValue]>' can only be iterated through when using the '--downlevelIteration' flag or with a '--target' of 'es2015' or higher.
+client/src/pages/ManagerDashboard.tsx(403,52): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(459,41): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(475,30): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(523,29): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(529,11): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(741,58): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(770,44): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(775,40): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(782,44): error TS7006: Parameter 'e' implicitly has an 'any' type.
+client/src/pages/ManagerDashboard.tsx(782,76): error TS7006: Parameter 'emergency' implicitly has an 'any' type.
+server/routes.ts(51,10): error TS2345: Argument of type 'Error' is not assignable to parameter of type 'null'.
+server/routes.ts(1752,44): error TS18046: 'emergencies' is of type 'unknown'.
+server/utils.ts(341,9): error TS2353: Object literal may only specify known properties, and 'source' does not exist in type 'NearbyFacility'.
+server/utils.ts(405,17): error TS2353: Object literal may only specify known properties, and 'source' does not exist in type 'NearbyFacility'.
+server/utils.ts(518,11): error TS2353: Object literal may only specify known properties, and 'source' does not exist in type 'NearbyFacility'.
