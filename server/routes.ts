@@ -7,13 +7,9 @@ import fs from "fs";
 import { storage } from "./storage";
 import { api, socketEvents } from "@shared/routes";
 import { insertVehicleSchema, insertDriverSchema } from "@shared/schema";
-import { generateTemporaryCredentials, sendSMS, findNearbyFacilities, getLocationName, isLocationInIndia } from "./utils";
+import { generateTemporaryCredentials, findNearbyFacilities, getLocationName, isLocationInIndia } from "./utils";
 import { EmailService } from "./email-service";
 import { z } from "zod";
-
-// Emergency notification phone numbers (configured)
-const POLICE_PHONE = process.env.POLICE_PHONE || "+1234567890";
-const HOSPITAL_PHONE = process.env.HOSPITAL_PHONE || "+0987654321";
 
 // Ensure uploads directory exists
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -183,24 +179,23 @@ export async function registerRoutes(
       service: "RideWithAlert API",
       timestamp: new Date().toISOString(),
       uptimeSeconds: Math.floor(process.uptime()),
-      smsConfigured: Boolean(process.env.FAST2SMS_API_KEY),
+      emailConfigured: Boolean(process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD),
       environment: process.env.NODE_ENV || "development",
       databaseConnected: true, // If we reach here, DB is connected
     });
   });
 
-  // Manual notification test endpoint for review/demo.
+  // Email test endpoint for review/demo.
   app.post("/api/notifications/test", async (req, res) => {
-    const policePhone = req.body?.policePhone || POLICE_PHONE;
-    const hospitalPhone = req.body?.hospitalPhone || HOSPITAL_PHONE;
+    const testRecipients = process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [process.env.EMAIL_USER];
     const customMessage = req.body?.message;
 
-    const defaultMessage = `*TEST ALERT (RideWithAlert)*
+    const defaultMessage = `TEST ALERT (RideWithAlert)
 
-*This is a review/demo notification test.*
-*No real emergency action is required.*
+This is a review/demo email notification test.
+No real emergency action is required.
 
-*Time :* ${new Date().toLocaleString('en-IN', { 
+Time: ${new Date().toLocaleString('en-IN', { 
   timeZone: 'Asia/Kolkata',
   day: '2-digit',
   month: '2-digit', 
@@ -211,35 +206,37 @@ export async function registerRoutes(
   hour12: true
 })}
 
-*Test Details :*
+Test Details:
 System: RideWithAlert Emergency System
 Environment: ${process.env.NODE_ENV || 'development'}
-SMS Service: Fast2SMS API
+Email Service: Gmail SMTP
 
-*This message is for testing purposes only. Please do not panic.*`;
+This message is for testing purposes only. Please do not panic.`;
+
     const message = String(customMessage || defaultMessage);
 
     try {
-      const [policeResult, hospitalResult] = await Promise.all([
-        sendSMS(String(policePhone), message),
-        sendSMS(String(hospitalPhone), message),
-      ]);
+      const results = [];
+      
+      for (const recipient of testRecipients) {
+        try {
+          // Use EmailService to send test email
+          await EmailService.sendTestEmail(recipient, message);
+          results.push({ recipient, status: 'sent' });
+        } catch (error) {
+          results.push({ recipient, status: 'failed', error: error instanceof Error ? error.message : String(error) });
+        }
+      }
 
       res.json({
-        message: "Test notifications processed",
-        recipients: {
-          policePhone: String(policePhone),
-          hospitalPhone: String(hospitalPhone),
-        },
-        results: {
-          police: policeResult,
-          hospital: hospitalResult,
-        },
+        message: "Test email notifications processed",
+        recipients: testRecipients,
+        results
       });
     } catch (error: any) {
-      console.error("Notification test error:", error);
+      console.error("Email notification test error:", error);
       res.status(500).json({
-        message: "Failed to process test notifications",
+        message: "Failed to process test email notifications",
         error: error?.message || "Unknown error",
       });
     }
@@ -455,67 +452,6 @@ SMS Service: Fast2SMS API
       if (!fullTrip) {
         return res.status(500).json({ message: "Failed to create trip" });
       }
-
-      // Send SMS notification with route details
-      const dangerZoneCount = routeToUse.dangerZones?.length || 0;
-      
-      // Build city route string
-      let cityRoute = '';
-      if (routeToUse.citiesOnRoute && routeToUse.citiesOnRoute.length > 0) {
-        cityRoute = '\n*Route via:*\n';
-        routeToUse.citiesOnRoute.forEach((city: any, idx: number) => {
-          cityRoute += `  ${idx + 1}. ${city.name}`;
-          if (city.distanceFromStart > 0) {
-            cityRoute += ` (${city.distanceFromStart}km)`;
-          }
-          cityRoute += '\n';
-        });
-      }
-      
-      // Build danger zones string
-      let dangerZonesInfo = '';
-      if (routeToUse.dangerZones && routeToUse.dangerZones.length > 0) {
-        dangerZonesInfo = '\n*Danger Zones:*\n';
-        routeToUse.dangerZones.forEach((zone: any, idx: number) => {
-          dangerZonesInfo += `  ${idx + 1}. ${zone.location || zone.name || 'Unknown Location'}`;
-          if (zone.riskLevel) {
-            dangerZonesInfo += ` (${zone.riskLevel})`;
-          }
-          dangerZonesInfo += '\n';
-        });
-      }
-      
-      const smsMessage = `🚗 *TRIP ASSIGNED - RideWithAlert*
-
-*Driver:* ${driver.name}
-*Vehicle:* ${vehicleNumber} (${vehicle.vehicleType})
-*Route:* ${startLocation || 'Start Location'} → ${endLocation || 'Destination'}
-
-*Login Credentials:*
-Username: ${temporaryUsername}
-Password: ${temporaryPassword}
-Portal: ${req.protocol}://${req.get('host')}/login/driver
-
-*Trip Details:*
-- Vehicle Fuel: ${vehicle.currentFuel}%
-- Safety Score: ${selectedRoute?.safetyMetrics?.overallSafetyScore || 'N/A'}/100
-- Est. Distance: ${selectedRoute?.distance ? (selectedRoute.distance/1000).toFixed(1) + 'km' : 'Calculating...'}
-- Est. Time: ${selectedRoute?.estimatedTime ? Math.round(selectedRoute.estimatedTime/60) + ' mins' : 'Calculating...'}
-
-*Important:*
-- Login immediately to start GPS tracking
-- Press SOS button for emergencies
-- Follow traffic rules and drive safely
-
-*Emergency Contacts:*
-Authorities: 100 | Medical: 108 | Fire: 101
-
-**TESTING PURPOSE ONLY - This is a demo application**
-
-Safe travels! 🛡️`;
-      
-      console.log('📱 Sending detailed SMS notification to driver:', driver.phoneNumber);
-      await sendSMS(driver.phoneNumber, smsMessage);
 
       // Send email notification with trip details and route map
       try {
@@ -870,37 +806,15 @@ Safe travels! 🛡️`;
 
       const trip = await storage.cancelTrip(tripId);
       
-      // Send detailed cancellation SMS to driver
-      const cancellationMessage = `🚫 *TRIP CANCELLED - RideWithAlert*
-
-*Driver:* ${fullTrip.driver.name}
-*Vehicle:* ${fullTrip.vehicleNumber}
-*Cancelled At:* ${new Date().toLocaleString('en-IN', { 
-        timeZone: 'Asia/Kolkata',
-        day: '2-digit',
-        month: '2-digit', 
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      })}
-
-*Reason:* Trip cancelled by management
-
-*Next Steps:*
-- Return vehicle to designated location
-- Contact fleet manager for new assignments
-- Ensure vehicle is properly parked and secured
-
-*Contact Information:*
-Management: ${process.env.MANAGER_PHONE || '9342746662'}
-Emergency: 100 (Authorities) | 108 (Medical)
-
-**TESTING PURPOSE ONLY - This is a demo application**
-
-Thank you for your service. 🙏`;
-      
-      await sendSMS(fullTrip.driver.phoneNumber, cancellationMessage);
+      // Send email notification about trip cancellation
+      try {
+        console.log('📧 Sending trip cancellation email to driver:', fullTrip.driver.email);
+        await EmailService.sendTripCancellation(fullTrip.driver, fullTrip, fullTrip.vehicle);
+        console.log('✅ Trip cancellation email sent successfully');
+      } catch (emailError) {
+        console.error('❌ Failed to send trip cancellation email:', emailError);
+        // Don't fail the cancellation if email fails
+      }
 
       res.json(trip);
     } catch (err) {
@@ -1285,7 +1199,7 @@ Thank you for your service. 🙏`;
       setImmediate(async () => {
         try {
           // Find nearby facilities
-          const allFacilities = await findNearbyFacilities(latitude, longitude, POLICE_PHONE, HOSPITAL_PHONE);
+          const allFacilities = await findNearbyFacilities(latitude, longitude);
           console.log(`[NEARBY FACILITIES] Found ${allFacilities.length} facilities`);
           
           // Get location name
@@ -1339,7 +1253,7 @@ Thank you for your service. 🙏`;
         return res.status(400).json({ message: "Valid latitude and longitude required" });
       }
 
-      const facilities = await findNearbyFacilities(latitude, longitude, POLICE_PHONE, HOSPITAL_PHONE);
+      const facilities = await findNearbyFacilities(latitude, longitude);
       res.json(facilities);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
@@ -1415,7 +1329,7 @@ Thank you for your service. 🙏`;
       const longitude = parseFloat(String(fullEmergency.longitude));
 
       // Get nearby facilities
-      const allFacilities = await findNearbyFacilities(latitude, longitude, POLICE_PHONE, HOSPITAL_PHONE);
+      const allFacilities = await findNearbyFacilities(latitude, longitude);
 
       // Send emails to police and hospitals for REAL emergency
       try {
@@ -1508,9 +1422,9 @@ Thank you for your service. 🙏`;
         console.error('❌ Error stopping trip:', tripError);
       }
 
-      // 2. FETCH NEARBY FACILITIES for accurate SMS
+      // 2. FETCH NEARBY FACILITIES for emergency email
       console.log(`[FETCHING FACILITIES] For emergency at ${latitude}, ${longitude}`);
-      let nearbyFacilities = await findNearbyFacilities(latitude, longitude, POLICE_PHONE, HOSPITAL_PHONE);
+      let nearbyFacilities = await findNearbyFacilities(latitude, longitude);
       if ((!nearbyFacilities || nearbyFacilities.length === 0) && Array.isArray(facilitiesFromManager) && facilitiesFromManager.length > 0) {
         nearbyFacilities = facilitiesFromManager;
         console.log(`[FACILITIES FALLBACK] Using ${nearbyFacilities.length} facilities from manager popup payload`);
@@ -1537,7 +1451,7 @@ To: ${activeTrip.endLocation || 'Destination'}
         console.error('Error fetching trip route details:', tripError);
       }
 
-      // Show ALL facility types in SMS message with enhanced categorization
+      // Show ALL facility types in emergency email with enhanced categorization
       const facilitiesByType = {
         // Medical Facilities (hospitals, clinics, pharmacies)
         medical: (nearbyFacilities || []).filter((f: any) => 
@@ -1629,121 +1543,16 @@ Driver Phone: ${driver.phoneNumber}
 *GPS Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}*
 *TRIP HAS BEEN STOPPED*`;
 
-      // 5. SEND SMS TO POLICE AND HOSPITAL using Fast2SMS
-      // Create detailed emergency messages with comprehensive information
-      
-      // Format nearby facilities for SMS
-      const formatFacilitiesForSMS = (facilities: any[], type: string) => {
-        const filtered = facilities.filter((f: any) => {
-          const facilityType = f.type?.toLowerCase();
-          if (type === 'hospitals') return facilityType === 'hospital' || facilityType === 'clinic';
-          if (type === 'authorities') return facilityType === 'police';
-          if (type === 'fire') return facilityType === 'fire_station';
-          if (type === 'fuel') return facilityType === 'fuel_station';
-          return false;
-        });
-        
-        if (filtered.length === 0) return 'None nearby';
-        
-        return filtered
-          .slice(0, 3) // Limit to 3 facilities
-          .map((f: any) => `${f.name} (${f.distance}km)`)
-          .join(', ');
-      };
-
-      const hospitalsNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'hospitals');
-      const authoritiesNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'authorities');
-      const fireNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'fire');
-      const fuelNearby = formatFacilitiesForSMS(nearbyFacilities || [], 'fuel');
-
-      const policeMessage = `*EMERGENCY ALERT TO THE AUTHORITIES CONTROL ROOM*
-
-*Driver :* ${driver.name} (${fullEmergency.driverNumber})
-*Vehicle :* ${fullEmergency.vehicleNumber} (${vehicle.vehicleType})
-*Location :* ${locationName}
-*Coordinates :* ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
-*Time :* ${new Date().toLocaleString('en-IN', { 
-  timeZone: 'Asia/Kolkata',
-  day: '2-digit',
-  month: '2-digit', 
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: true
-})}
-*Emergency ID :* ${emergencyId}
-
-*Medical Information :*
-Blood Group: ${driver.bloodGroup || 'Unknown'}
-Medical Conditions: ${driver.medicalConditions || 'NONE'}
-Emergency Contact: ${driver.emergencyContact || 'Not available'} (${driver.emergencyContactPhone || 'No phone'})
-
-*Nearby Emergency Resources :*
-Hospitals: ${hospitalsNearby}
-Authorities: ${authoritiesNearby}
-Fire Stations: ${fireNearby}
-Fuel Stations: ${fuelNearby}
-
-*Emergency Contacts :*
-Authorities: 100 | Medical: 108 | Fire: 101
-Driver Phone: ${driver.phoneNumber}
-
-*GPS Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}*
-*TRIP HAS BEEN STOPPED*
-
-*IMMEDIATE AUTHORITIES ASSISTANCE REQUIRED !*
-
-*This message is for testing purposes only. Please do not panic.*`;
-
-      const hospitalMessage = `*MEDICAL EMERGENCY ALERT TO HOSPITAL CONTROL ROOM*
-
-*Driver :* ${driver.name} (${fullEmergency.driverNumber})
-*Vehicle :* ${fullEmergency.vehicleNumber} (${vehicle.vehicleType})
-*Location :* ${locationName}
-*Coordinates :* ${latitude.toFixed(6)}, ${longitude.toFixed(6)}
-*Time :* ${new Date().toLocaleString('en-IN', { 
-  timeZone: 'Asia/Kolkata',
-  day: '2-digit',
-  month: '2-digit', 
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: true
-})}
-*Emergency ID :* ${emergencyId}
-
-*Medical Information :*
-Blood Group: ${driver.bloodGroup || 'Unknown'}
-Medical Conditions: ${driver.medicalConditions || 'NONE'}
-Emergency Contact: ${driver.emergencyContact || 'Not available'} (${driver.emergencyContactPhone || 'No phone'})
-
-*Nearby Medical Resources :*
-Hospitals: ${hospitalsNearby}
-Clinics: ${formatFacilitiesForSMS(nearbyFacilities || [], 'hospitals')}
-Pharmacies: ${formatFacilitiesForSMS(nearbyFacilities || [], 'pharmacy')}
-
-*Emergency Contacts :*
-Authorities: 100 | Medical: 108 | Fire: 101
-Driver Phone: ${driver.phoneNumber}
-
-*GPS Location: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}*
-*TRIP HAS BEEN STOPPED*
-
-*IMMEDIATE MEDICAL ASSISTANCE REQUIRED !*
-
-*This message is for testing purposes only. Please do not panic.*`;
-      
-      // Print exact SMS content in terminal for verification/demo.
-      console.log(`\n========== AUTHORITIES SMS (Emergency ${emergencyId}) ==========\n${policeMessage}\n===========================================================\n`);
-      console.log(`\n========= HOSPITAL SMS (Emergency ${emergencyId}) =========\n${hospitalMessage}\n===========================================================\n`);
-
-      console.log(`[MANAGER APPROVED 🚨] Sending to Authorities: ${POLICE_PHONE}`);
-      await sendSMS(POLICE_PHONE, policeMessage);
-      
-      console.log(`[MANAGER APPROVED 🚨] Sending to Hospital: ${HOSPITAL_PHONE}`);
-      await sendSMS(HOSPITAL_PHONE, hospitalMessage);
+      // 5. SEND EMAIL TO POLICE AND HOSPITAL (only for real emergencies)
+      // Send real emergency alert emails
+      try {
+        console.log(`[MANAGER APPROVED 🚨] Sending real emergency emails for Emergency ${emergencyId}`);
+        await EmailService.sendRealEmergencyAlert(fullEmergency, driver, vehicle, nearbyFacilities || []);
+        console.log('✅ Real emergency alert emails sent successfully');
+      } catch (emailError) {
+        console.error('❌ Failed to send real emergency alert emails:', emailError);
+        // Don't fail the emergency approval if email fails
+      }
 
       // Emit approval event
       io.emit('EMERGENCY_APPROVED', { emergencyId });

@@ -651,7 +651,7 @@ export default function ManagerDashboard() {
           console.log('✅ Trip assigned successfully!');
           toast({
             title: "Trip Assigned Successfully! 🚗",
-            description: "Driver has been notified via SMS with login credentials.",
+            description: "Driver has been notified via email with login credentials.",
             duration: 5000
           });
           // Reset form

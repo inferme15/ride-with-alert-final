@@ -215,7 +215,7 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
       alarmRef.current.audioContext = undefined;
     }
     
-    // Acknowledge as false alarm (no SMS sent)
+    // Acknowledge as false alarm (no email sent)
     acknowledge(emergency.emergencyId, {
       onSuccess: () => {
         toast({

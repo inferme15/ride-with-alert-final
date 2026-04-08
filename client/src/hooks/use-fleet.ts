@@ -139,7 +139,7 @@ export function useAssignTrip() {
       queryClient.invalidateQueries({ queryKey: [api.vehicles.list.path] });
       toast({ 
         title: "Trip Assigned Successfully! 🚗", 
-        description: `SMS sent to driver. Username: ${data.temporaryUsername}, Password: ${data.temporaryPassword}`,
+        description: `Email sent to driver. Username: ${data.temporaryUsername}, Password: ${data.temporaryPassword}`,
         duration: 10000
       });
     },
@@ -193,7 +193,7 @@ export function useCancelTrip() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [api.trips.list.path] });
-      toast({ title: "Trip Cancelled", description: "Trip cancelled and SMS sent to driver." });
+      toast({ title: "Trip Cancelled", description: "Trip cancelled and email sent to driver." });
     },
   });
 }

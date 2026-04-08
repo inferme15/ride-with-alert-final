@@ -3,11 +3,16 @@ import type { Driver, Emergency, Trip, Vehicle, NearbyFacility } from '../shared
 
 // Email configuration
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 587,
+  secure: false, // Use STARTTLS
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_APP_PASSWORD, // Gmail App Password
+    pass: process.env.EMAIL_APP_PASSWORD,
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 // Email templates
@@ -20,6 +25,18 @@ export class EmailService {
     vehicle: Vehicle,
     routeData?: any
   ) {
+    // Check if email is configured
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+      console.log('📧 Email not configured - skipping email notification');
+      return;
+    }
+
+    console.log('📧 Email config check:', {
+      emailUser: process.env.EMAIL_USER,
+      hasPassword: !!process.env.EMAIL_APP_PASSWORD,
+      driverEmail: driver.email
+    });
+
     const routeMapUrl = routeData 
       ? `https://www.google.com/maps/dir/${trip.startLatitude},${trip.startLongitude}/${trip.endLatitude},${trip.endLongitude}`
       : '';
@@ -91,10 +108,98 @@ export class EmailService {
     };
 
     try {
-      await transporter.sendMail(mailOptions);
-      console.log(`Trip assignment email sent to ${driver.email}`);
+      console.log('📧 Attempting to send email to:', driver.email);
+      const result = await transporter.sendMail(mailOptions);
+      console.log('✅ Trip assignment email sent successfully:', result.messageId);
     } catch (error) {
-      console.error('Error sending trip assignment email:', error);
+      console.error('❌ Error sending trip assignment email:', error);
+      console.error('📧 Email config debug:', {
+        host: 'smtp.gmail.com',
+        port: 587,
+        user: process.env.EMAIL_USER,
+        hasPassword: !!process.env.EMAIL_APP_PASSWORD
+      });
+      throw error;
+    }
+  }
+
+  // Send trip cancellation email
+  static async sendTripCancellation(
+    driver: Driver,
+    trip: Trip,
+    vehicle: Vehicle
+  ) {
+    // Check if email is configured
+    if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+      console.log('📧 Email not configured - skipping trip cancellation email');
+      return;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+          .header { background: #dc2626; color: white; padding: 20px; text-align: center; }
+          .content { padding: 20px; }
+          .cancellation-details { background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #dc2626; }
+          .next-steps { background: #f8fafc; padding: 15px; border-radius: 8px; margin: 15px 0; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🚫 Trip Cancelled</h1>
+        </div>
+        <div class="content">
+          <h2>Hello ${driver.name},</h2>
+          <p>Your assigned trip has been cancelled. Please review the details below:</p>
+          
+          <div class="cancellation-details">
+            <h3>Cancellation Details</h3>
+            <p><strong>Trip ID:</strong> ${trip.tripId}</p>
+            <p><strong>Vehicle:</strong> ${vehicle.vehicleNumber} (${vehicle.vehicleType})</p>
+            <p><strong>Route:</strong> ${trip.startLocation} → ${trip.endLocation}</p>
+            <p><strong>Cancelled At:</strong> ${new Date().toLocaleString('en-IN', { 
+              timeZone: 'Asia/Kolkata',
+              day: '2-digit',
+              month: '2-digit', 
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            })}</p>
+            <p><strong>Reason:</strong> Trip cancelled by management</p>
+          </div>
+
+          <div class="next-steps">
+            <h3>📋 Next Steps</h3>
+            <ul>
+              <li>Return vehicle to designated location</li>
+              <li>Contact fleet manager for new assignments</li>
+              <li>Ensure vehicle is properly parked and secured</li>
+            </ul>
+          </div>
+
+          <p>Thank you for your service.</p>
+          <p><strong>Fleet Management Team</strong></p>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: driver.email,
+      subject: `🚫 Trip Cancelled - ${trip.tripId}`,
+      html: htmlContent,
+    };
+
+    try {
+      const result = await transporter.sendMail(mailOptions);
+      console.log('✅ Trip cancellation email sent successfully:', result.messageId);
+    } catch (error) {
+      console.error('❌ Error sending trip cancellation email:', error);
       throw error;
     }
   }
@@ -171,8 +276,8 @@ export class EmailService {
             ${nearbyFacilities.slice(0, 5).map(facility => `
               <div class="facility-item">
                 <strong>${facility.name}</strong> (${facility.type.replace('_', ' ').toUpperCase()})<br>
-                📍 ${facility.address}, ${facility.city}<br>
-                📞 ${facility.phoneNumber}${facility.emergencyPhone ? ` | Emergency: ${facility.emergencyPhone}` : ''}<br>
+                📍 ${facility.address}<br>
+                📞 ${facility.phone}<br>
                 📏 Distance: ${facility.distance.toFixed(1)} km
               </div>
             `).join('')}
@@ -284,6 +389,47 @@ export class EmailService {
     } catch (error) {
       console.error('Email service error:', error);
       return false;
+    }
+  }
+
+  // Send test email
+  static async sendTestEmail(recipient: string, message: string) {
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: recipient,
+      subject: '🧪 RideWithAlert - Test Email',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .header { background: #2563eb; color: white; padding: 20px; text-align: center; }
+            .content { padding: 20px; }
+            .test-box { background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #2563eb; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>🧪 Test Email</h1>
+          </div>
+          <div class="content">
+            <div class="test-box">
+              <pre>${message}</pre>
+            </div>
+            <p>This is a test email from RideWithAlert system.</p>
+          </div>
+        </body>
+        </html>
+      `,
+    };
+
+    try {
+      const result = await transporter.sendMail(mailOptions);
+      console.log(`Test email sent to ${recipient}:`, result.messageId);
+    } catch (error) {
+      console.error(`Error sending test email to ${recipient}:`, error);
+      throw error;
     }
   }
 }
