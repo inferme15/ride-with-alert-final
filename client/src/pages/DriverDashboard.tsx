@@ -750,6 +750,14 @@ export default function DriverDashboard() {
       try {
         // PHASE 1: Start 10-second video recording immediately
         console.log('🎥 [PERFECT FLOW] Starting exactly 10-second video recording...');
+        console.log('📷 [DEBUG] Camera state before recording:', {
+          cameraReady,
+          cameraError,
+          webcamRef: !!webcamRef.current,
+          webcamStream: webcamRef.current?.stream?.active,
+          mediaRecorderRef: !!mediaRecorderRef.current
+        });
+        
         const videoPromise = recordEmergencyClip(10000);
         
         // PHASE 1: Collect nearby facilities in parallel
@@ -757,10 +765,21 @@ export default function DriverDashboard() {
           `/api/emergency/nearby-facilities?latitude=${activeLocation.lat}&longitude=${activeLocation.lng}`
         )
           .then(async (r) => (r.ok ? r.json() : []))
-          .catch(() => []);
+          .catch((err) => {
+            console.error('❌ [PERFECT FLOW] Failed to fetch facilities:', err);
+            return [];
+          });
 
         // PHASE 1: Wait for both video and facilities (should complete at 10 seconds)
+        console.log('⏳ [PERFECT FLOW] Waiting for video recording and facilities...');
         const [videoBlob, facilities] = await Promise.all([videoPromise, facilitiesPromise]);
+        
+        console.log('🎬 [PERFECT FLOW] Video recording completed:', {
+          hasVideo: !!videoBlob,
+          videoSize: videoBlob?.size || 0,
+          videoType: videoBlob?.type || 'none',
+          facilitiesCount: facilities?.length || 0
+        });
         
         if (Array.isArray(facilities)) setDriverNearbyFacilities(facilities);
 

@@ -29,7 +29,7 @@ export function useTriggerEmergency() {
   return useMutation({
     mutationFn: async (formData: FormData) => {
       // ENHANCED DEBUG: Log FormData contents before sending
-      console.log('🚀 [EMERGENCY HOOK] Sending emergency request...');
+      console.log('🚀 [EMERGENCY HOOK] Sending emergency request to /api/emergency/trigger');
       console.log('📋 [EMERGENCY HOOK] FormData contents:');
       formData.forEach((value, key) => {
         if (value instanceof File) {
@@ -39,29 +39,42 @@ export function useTriggerEmergency() {
         }
       });
       
-      // Note: Trigger uses multipart/form-data for potential video file
-      const res = await fetch("/api/emergency/trigger", {
-        method: "POST",
-        body: formData, // FormData automatically sets correct Content-Type boundary
-        credentials: "include",
-      });
-      
-      console.log('📡 [EMERGENCY HOOK] Response received:', {
-        status: res.status,
-        statusText: res.statusText,
-        ok: res.ok,
-        headers: Object.fromEntries(res.headers.entries())
-      });
-      
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('❌ [EMERGENCY HOOK] Request failed:', text);
-        throw new Error(text || "Failed to trigger emergency");
+      try {
+        // Note: Trigger uses multipart/form-data for potential video file
+        const res = await fetch("/api/emergency/trigger", {
+          method: "POST",
+          body: formData, // FormData automatically sets correct Content-Type boundary
+          credentials: "include",
+        });
+        
+        console.log('📡 [EMERGENCY HOOK] Response received:', {
+          status: res.status,
+          statusText: res.statusText,
+          ok: res.ok,
+          url: res.url,
+          headers: Object.fromEntries(res.headers.entries())
+        });
+        
+        if (!res.ok) {
+          const text = await res.text();
+          console.error('❌ [EMERGENCY HOOK] Request failed:', text);
+          throw new Error(text || "Failed to trigger emergency");
+        }
+        
+        // Trigger endpoint may return 201 (new emergency) or 200 (video-only update).
+        const responseData = await res.json();
+        console.log('✅ [EMERGENCY HOOK] Success response:', responseData);
+        return responseData;
+        
+      } catch (error) {
+        console.error('❌ [EMERGENCY HOOK] Network error:', error);
+        console.error('❌ [EMERGENCY HOOK] Error details:', {
+          name: error.name,
+          message: error.message,
+          stack: error.stack
+        });
+        throw error;
       }
-      // Trigger endpoint may return 201 (new emergency) or 200 (video-only update).
-      const responseData = await res.json();
-      console.log('✅ [EMERGENCY HOOK] Success response:', responseData);
-      return responseData;
     },
     onSuccess: () => {
       toast({ 
@@ -71,10 +84,11 @@ export function useTriggerEmergency() {
         duration: 10000 
       });
     },
-    onError: () => {
+    onError: (error) => {
+      console.error('❌ [EMERGENCY HOOK] Mutation error:', error);
       toast({ 
         title: "ALERT FAILED", 
-        description: "Could not send emergency signal. Please call emergency services directly.", 
+        description: `Could not send emergency signal: ${error.message}. Please call emergency services directly.`, 
         variant: "destructive",
         duration: Infinity
       });
