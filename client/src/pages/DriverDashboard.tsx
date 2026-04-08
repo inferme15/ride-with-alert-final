@@ -758,7 +758,16 @@ export default function DriverDashboard() {
           mediaRecorderRef: !!mediaRecorderRef.current
         });
         
-        const videoPromise = recordEmergencyClip(10000);
+        // Start video recording with timeout protection
+        const videoPromise = Promise.race([
+          recordEmergencyClip(10000),
+          new Promise<null>((resolve) => {
+            setTimeout(() => {
+              console.warn('⚠️ [PERFECT FLOW] Video recording timeout after 12 seconds');
+              resolve(null);
+            }, 12000);
+          })
+        ]);
         
         // PHASE 1: Collect nearby facilities in parallel
         const facilitiesPromise = fetch(
@@ -794,6 +803,22 @@ export default function DriverDashboard() {
         // PHASE 2: Prepare emergency data (10-12 seconds)
         setStatusMessage("📡 Sending emergency alert to manager...");
         
+        // Test server connectivity first
+        console.log('🔍 [PERFECT FLOW] Testing server connectivity...');
+        try {
+          const testResponse = await fetch('/api/trips/list', { 
+            method: 'GET',
+            credentials: 'include'
+          });
+          console.log('✅ [PERFECT FLOW] Server connectivity test:', {
+            status: testResponse.status,
+            ok: testResponse.ok,
+            url: testResponse.url
+          });
+        } catch (testError) {
+          console.error('❌ [PERFECT FLOW] Server connectivity test failed:', testError);
+        }
+        
         const formData = new FormData();
         formData.append('driverNumber', trip.driverNumber);
         formData.append('vehicleNumber', trip.vehicleNumber);
@@ -815,9 +840,25 @@ export default function DriverDashboard() {
         }
 
         // PHASE 2: Send to manager (should reach manager at 12 seconds)
-        await triggerEmergency(formData);
-
-        console.log('✅ [PERFECT FLOW] Emergency alert sent to manager at 12 seconds');
+        console.log('📡 [PERFECT FLOW] About to send emergency request...');
+        console.log('🌐 [PERFECT FLOW] Request details:', {
+          url: '/api/emergency/trigger',
+          method: 'POST',
+          hasFormData: !!formData,
+          formDataEntries: Array.from(formData.entries()).map(([key, value]) => ({
+            key,
+            type: value instanceof File ? 'File' : 'string',
+            size: value instanceof File ? value.size : value.length
+          }))
+        });
+        
+        try {
+          await triggerEmergency(formData);
+          console.log('✅ [PERFECT FLOW] Emergency alert sent to manager at 12 seconds');
+        } catch (error) {
+          console.error('❌ [PERFECT FLOW] Emergency trigger failed:', error);
+          throw error; // Re-throw to be caught by outer try-catch
+        }
         
         // PHASE 3: Driver sees confirmation
         setStatusMessage("🚨 EMERGENCY SENT! Manager reviewing (10s decision window)");
