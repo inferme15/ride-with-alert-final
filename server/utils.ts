@@ -114,11 +114,11 @@ export async function sendSMS(phoneNumber: string, message: string): Promise<{ s
   const truncatedMessage = message.length > 150 ? message.substring(0, 147) + "..." : message;
 
   try {
-    // Fast2SMS API endpoint
+    // Try Fast2SMS v3 API endpoint first
     const url = `https://www.fast2sms.com/dev/bulkV2`;
     
     const requestBody = {
-      route: "otp",
+      route: "v3",
       message: truncatedMessage,
       numbers: formattedNumber,
       flash: "0"
@@ -156,8 +156,9 @@ export async function sendSMS(phoneNumber: string, message: string): Promise<{ s
       // Handle specific error cases
       if (result.status_code === 998) {
         console.log(`[SMS FAILED ❌] DLT Route Issue: ${result.message}`);
-        console.log(`[SMS INFO] 💡 You may need to register DLT templates with Fast2SMS`);
+        console.log(`[SMS INFO] 💡 All routes require DLT compliance in your account`);
         console.log(`[SMS INFO] 💡 Visit: https://www.fast2sms.com/dlt-registration`);
+        console.log(`[SMS INFO] 💡 Or contact Fast2SMS support for route activation`);
       } else if (result.status_code === 406) {
         console.log(`[SMS FAILED ❌] Invalid Sender ID: ${result.message}`);
         console.log(`[SMS INFO] 💡 Check your Fast2SMS dashboard for approved Sender IDs`);
