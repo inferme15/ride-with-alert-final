@@ -118,7 +118,7 @@ export async function sendSMS(phoneNumber: string, message: string): Promise<{ s
     const url = `https://www.fast2sms.com/dev/bulkV2`;
     
     const requestBody = {
-      route: "q",
+      route: "dlt",
       message: truncatedMessage,
       numbers: formattedNumber,
       flash: "0"
@@ -153,7 +153,14 @@ export async function sendSMS(phoneNumber: string, message: string): Promise<{ s
         messageId: result.message_id || result.request_id || crypto.randomBytes(8).toString("hex"),
       };
     } else {
-      console.log(`[SMS FAILED ❌] ${result.message || "Unknown error"}`);
+      // Handle specific error cases
+      if (result.status_code === 998) {
+        console.log(`[SMS FAILED ❌] DLT Route Issue: ${result.message}`);
+        console.log(`[SMS INFO] 💡 You may need to register DLT templates with Fast2SMS`);
+        console.log(`[SMS INFO] 💡 Visit: https://www.fast2sms.com/dlt-registration`);
+      } else {
+        console.log(`[SMS FAILED ❌] ${result.message || "Unknown error"}`);
+      }
       console.log(`[SMS FAILED ❌] Full error:`, result);
       console.log(`[SMS FALLBACK] Using simulation mode`);
       return simulateSMSFallback(phoneNumber, message);
