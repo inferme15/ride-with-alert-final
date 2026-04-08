@@ -118,7 +118,7 @@ export async function sendSMS(phoneNumber: string, message: string): Promise<{ s
     const url = `https://www.fast2sms.com/dev/bulkV2`;
     
     const requestBody = {
-      route: "v3",
+      route: "q",
       message: truncatedMessage,
       numbers: formattedNumber,
       flash: "0"

@@ -509,6 +509,8 @@ Portal: ${req.protocol}://${req.get('host')}/login/driver
 *Emergency Contacts:*
 Authorities: 100 | Medical: 108 | Fire: 101
 
+**TESTING PURPOSE ONLY - This is a demo application**
+
 Safe travels! 🛡️`;
       
       console.log('📱 Sending detailed SMS notification to driver:', driver.phoneNumber);
@@ -882,6 +884,8 @@ Safe travels! 🛡️`;
 *Contact Information:*
 Management: ${process.env.MANAGER_PHONE || '9342746662'}
 Emergency: 100 (Authorities) | 108 (Medical)
+
+**TESTING PURPOSE ONLY - This is a demo application**
 
 Thank you for your service. 🙏`;
       
