@@ -1078,6 +1078,11 @@ Thank you for your service. 🙏`;
 
   // === EMERGENCY API ===
   app.post(api.emergency.trigger.path, upload.single("video"), async (req, res) => {
+    console.log(`🚨 [EMERGENCY TRIGGER] Route hit! Method: ${req.method}, Path: ${req.path}`);
+    console.log(`🚨 [EMERGENCY TRIGGER] Headers:`, req.headers);
+    console.log(`🚨 [EMERGENCY TRIGGER] Body keys:`, Object.keys(req.body || {}));
+    console.log(`🚨 [EMERGENCY TRIGGER] File:`, req.file ? 'Present' : 'None');
+    
     try {
       const driverNumber = req.body.driverNumber;
       const vehicleNumber = req.body.vehicleNumber;
@@ -1285,8 +1290,22 @@ Thank you for your service. 🙏`;
       });
 
     } catch (err) {
-      console.error("Emergency Trigger Error:", err);
-      res.status(500).json({ message: "Failed to trigger emergency", error: err instanceof Error ? err.message : String(err) });
+      console.error("🚨 [EMERGENCY TRIGGER] CRITICAL ERROR:", err);
+      console.error("🚨 [EMERGENCY TRIGGER] Error stack:", err instanceof Error ? err.stack : 'No stack');
+      console.error("🚨 [EMERGENCY TRIGGER] Error details:", {
+        name: err instanceof Error ? err.name : 'Unknown',
+        message: err instanceof Error ? err.message : String(err),
+        type: typeof err
+      });
+      
+      // Ensure we always send JSON response
+      if (!res.headersSent) {
+        res.status(500).json({ 
+          message: "Failed to trigger emergency", 
+          error: err instanceof Error ? err.message : String(err),
+          timestamp: new Date().toISOString()
+        });
+      }
     }
   });
 
