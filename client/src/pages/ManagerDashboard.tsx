@@ -120,7 +120,16 @@ export default function ManagerDashboard() {
     console.log("✅ [MANAGER] Setting up emergency listeners");
 
     const handleNewEmergency = (emergency: Emergency & { driver: Driver; vehicle: Vehicle }) => {
-      console.log("🚨 [MANAGER] New emergency received:", emergency);
+      console.log("🚨 [MANAGER] New emergency received:", {
+        emergencyId: emergency.emergencyId,
+        driverName: emergency.driver?.name,
+        vehicleNumber: emergency.vehicleNumber,
+        status: emergency.status,
+        latitude: emergency.latitude,
+        longitude: emergency.longitude,
+        hasVideo: !!emergency.videoUrl,
+        fullEmergency: emergency
+      });
       setActiveEmergency(emergency);
       toast({
         title: "🚨 EMERGENCY ALERT",
@@ -142,11 +151,17 @@ export default function ManagerDashboard() {
     const unsubscribeEmergency = subscribe(events.RECEIVE_EMERGENCY, handleNewEmergency);
     const unsubscribeAck = subscribe(events.EMERGENCY_ACKNOWLEDGED, handleEmergencyAcknowledged);
 
+    console.log("✅ [MANAGER] Emergency listeners subscribed to:", {
+      receiveEmergencyEvent: events.RECEIVE_EMERGENCY,
+      emergencyAcknowledgedEvent: events.EMERGENCY_ACKNOWLEDGED
+    });
+
     return () => {
+      console.log("🧹 [MANAGER] Cleaning up emergency listeners");
       unsubscribeEmergency?.();
       unsubscribeAck?.();
     };
-  }, [subscribe, events, toast]); // Removed refetchEmergencies to prevent excessive re-renders
+  }, [subscribe, events, toast, activeEmergency]); // Removed refetchEmergencies to prevent excessive re-renders
 
   // Geocode address to coordinates
   const geocodeAddress = async (address: string): Promise<{lat: number, lng: number} | null> => {

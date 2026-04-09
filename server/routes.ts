@@ -40,10 +40,18 @@ const upload = multer({
       size: file.size
     });
     
-    // Accept video files
-    if (file.mimetype.startsWith('video/')) {
+    // Accept video files - be more lenient with MIME types since browsers may report incorrectly
+    const isVideo = file.mimetype.startsWith('video/') || 
+                    file.originalname.endsWith('.webm') ||
+                    file.originalname.endsWith('.mp4') ||
+                    file.originalname.endsWith('.mov') ||
+                    file.mimetype === 'application/octet-stream'; // Fallback for unknown types
+    
+    if (isVideo) {
+      console.log('✅ [MULTER] Video file accepted');
       cb(null, true);
     } else {
+      console.error('❌ [MULTER] Non-video file rejected:', file.mimetype);
       cb(new Error('Only video files are allowed') as any, false);
     }
   }

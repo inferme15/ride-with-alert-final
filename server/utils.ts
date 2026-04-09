@@ -186,7 +186,7 @@ function searchHardcodedDatabase(
 }
 
 /**
- * Search Google Places API for nearby facilities
+ * Search Google Places API for nearby facilities with retry logic
  */
 async function searchGooglePlaces(
   latitude: number, 
@@ -198,7 +198,7 @@ async function searchGooglePlaces(
   // Google Places API key (you'll need to add this to environment variables)
   const apiKey = process.env.GOOGLE_PLACES_API_KEY;
   
-  if (!apiKey) {
+  if (!apiKey || apiKey === 'your_google_places_api_key_here') {
     console.log("⚠️ [GOOGLE PLACES] API key not configured, skipping Google search");
     return facilities;
   }
@@ -214,36 +214,84 @@ async function searchGooglePlaces(
     { type: 'car_repair', category: 'service_center' }
   ];
   
+  const maxRetries = 2;
+  
   try {
     for (const search of searchTypes) {
-      const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&type=${search.type}&key=${apiKey}`;
+      let lastError: any;
       
-      const response = await fetch(url);
-      if (response.ok) {
-        const data = await response.json();
-        
-        if (data.results) {
-          data.results.forEach((place: any) => {
-            if (place.geometry?.location) {
-              const distance = calculateDistance(
-                latitude, longitude,
-                place.geometry.location.lat, place.geometry.location.lng
-              );
-              
-              facilities.push({
-                name: place.name || `${search.category} facility`,
-                type: search.category as any,
-                latitude: place.geometry.location.lat,
-                longitude: place.geometry.location.lng,
-                distance: Math.round(distance * 10) / 10,
-                phone: place.formatted_phone_number || "N/A",
-                address: place.vicinity || place.formatted_address || "N/A",
-                isOpen24Hours: place.opening_hours?.open_now || search.category === 'hospital' || search.category === 'police',
-                controlRoomNumber: (search.category === 'police' || search.category === 'hospital') ? place.formatted_phone_number : undefined,
-                source: 'google'
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&type=${search.type}&key=${apiKey}`;
+          
+          // Add timeout for Google Places API
+          const controller = new AbortController();
+          const timeoutMs = attempt === 1 ? 5000 : 8000; // 5s first attempt, 8s for retry
+          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+          
+          const response = await fetch(url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            
+            // Check for API errors in response
+            if (data.status && data.status !== 'OK') {
+              if (data.status === 'ZERO_RESULTS') {
+                console.log(`ℹ️ [GOOGLE PLACES] No results for ${search.type}`);
+                break; // Move to next search type
+              } else if (data.status === 'OVER_QUERY_LIMIT') {
+                console.warn(`⚠️ [GOOGLE PLACES] Rate limit exceeded for ${search.type}`);
+                lastError = new Error('Rate limit exceeded');
+                continue; // Retry
+              } else {
+                console.warn(`⚠️ [GOOGLE PLACES] API error for ${search.type}: ${data.status}`);
+                lastError = new Error(data.status);
+                continue; // Retry
+              }
+            }
+            
+            if (data.results) {
+              data.results.forEach((place: any) => {
+                if (place.geometry?.location) {
+                  const distance = calculateDistance(
+                    latitude, longitude,
+                    place.geometry.location.lat, place.geometry.location.lng
+                  );
+                  
+                  facilities.push({
+                    name: place.name || `${search.category} facility`,
+                    type: search.category as any,
+                    latitude: place.geometry.location.lat,
+                    longitude: place.geometry.location.lng,
+                    distance: Math.round(distance * 10) / 10,
+                    phone: place.formatted_phone_number || "N/A",
+                    address: place.vicinity || place.formatted_address || "N/A",
+                    isOpen24Hours: place.opening_hours?.open_now || search.category === 'hospital' || search.category === 'police',
+                    controlRoomNumber: (search.category === 'police' || search.category === 'hospital') ? place.formatted_phone_number : undefined,
+                    source: 'google'
+                  });
+                }
               });
             }
-          });
+            
+            break; // Success, move to next search type
+          } else {
+            lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+            console.warn(`⚠️ [GOOGLE PLACES] HTTP error on attempt ${attempt} for ${search.type}:`, lastError);
+          }
+        } catch (error: any) {
+          lastError = error;
+          if (error.name === 'AbortError') {
+            console.warn(`⏱️ [GOOGLE PLACES] Timeout on attempt ${attempt} for ${search.type}`);
+          } else {
+            console.warn(`❌ [GOOGLE PLACES] Error on attempt ${attempt} for ${search.type}:`, error.message);
+          }
+          
+          // If not the last attempt, wait before retrying
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
         }
       }
       
@@ -251,14 +299,15 @@ async function searchGooglePlaces(
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   } catch (error) {
-    console.error("❌ [GOOGLE PLACES] API error:", error);
+    console.error("❌ [GOOGLE PLACES] Unexpected error:", error);
   }
   
+  console.log(`🟢 [GOOGLE PLACES] Found ${facilities.length} facilities`);
   return facilities;
 }
 
 /**
- * Search OpenStreetMap API for nearby facilities
+ * Search OpenStreetMap API for nearby facilities with retry logic
  */
 async function searchOpenStreetMap(
   latitude: number,
@@ -268,100 +317,124 @@ async function searchOpenStreetMap(
   hospitalPhone: string
 ): Promise<NearbyFacility[]> {
   const facilities: NearbyFacility[] = [];
+  const maxRetries = 2;
+  let lastError: any;
   
-  try {
-    // OpenStreetMap Overpass API query with reduced timeout
-    const overpassQuery = `
-      [out:json][timeout:10];
-      (
-        node["amenity"="hospital"](around:${radius},${latitude},${longitude});
-        node["amenity"="clinic"](around:${radius},${latitude},${longitude});
-        node["amenity"="pharmacy"](around:${radius},${latitude},${longitude});
-        node["amenity"="police"](around:${radius},${latitude},${longitude});
-        node["amenity"="fire_station"](around:${radius},${latitude},${longitude});
-        node["amenity"="fuel"](around:${radius},${latitude},${longitude});
-        node["shop"="car_repair"](around:${radius},${latitude},${longitude});
-      );
-      out center;
-    `;
-
-    // Add timeout and abort controller
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `data=${encodeURIComponent(overpassQuery)}`,
-      signal: controller.signal
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const data = await response.json();
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 [OPENSTREETMAP] Attempt ${attempt}/${maxRetries} to fetch facilities`);
       
-      data.elements?.forEach((element: any) => {
-        const facilityLat = element.lat || element.center?.lat;
-        const facilityLon = element.lon || element.center?.lon;
-        
-        if (!facilityLat || !facilityLon) return;
+      // OpenStreetMap Overpass API query with timeout
+      const overpassQuery = `
+        [out:json][timeout:10];
+        (
+          node["amenity"="hospital"](around:${radius},${latitude},${longitude});
+          node["amenity"="clinic"](around:${radius},${latitude},${longitude});
+          node["amenity"="pharmacy"](around:${radius},${latitude},${longitude});
+          node["amenity"="police"](around:${radius},${latitude},${longitude});
+          node["amenity"="fire_station"](around:${radius},${latitude},${longitude});
+          node["amenity"="fuel"](around:${radius},${latitude},${longitude});
+          node["shop"="car_repair"](around:${radius},${latitude},${longitude});
+        );
+        out center;
+      `;
 
-        const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
-        
-        let type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "fire_station" = "service_center";
-        let phone = "N/A";
-        
-        // Map OSM amenities to our categories
-        if (element.tags?.amenity === "hospital") {
-          type = "hospital";
-          phone = element.tags?.phone || hospitalPhone;
-        } else if (element.tags?.amenity === "clinic") {
-          type = "hospital";
-          phone = element.tags?.phone || hospitalPhone;
-        } else if (element.tags?.amenity === "pharmacy") {
-          type = "pharmacy";
-          phone = element.tags?.phone || "1800-102-1088";
-        } else if (element.tags?.amenity === "police") {
-          type = "police";
-          phone = element.tags?.phone || policePhone;
-        } else if (element.tags?.amenity === "fire_station") {
-          type = "fire_station";
-          phone = element.tags?.phone || "101";
-        } else if (element.tags?.amenity === "fuel") {
-          type = "fuel_station";
-          phone = element.tags?.phone || "1800-2333-555";
-        } else if (element.tags?.shop === "car_repair") {
-          type = "service_center";
-          phone = element.tags?.phone || "N/A";
-        }
+      // Add timeout and abort controller - increase timeout for retries
+      const controller = new AbortController();
+      const timeoutMs = attempt === 1 ? 8000 : 12000; // 8s first attempt, 12s for retry
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-        const name = element.tags?.name || `${type.replace('_', ' ')} (${distance.toFixed(1)}km)`;
-        const address = [
-          element.tags?.["addr:street"],
-          element.tags?.["addr:city"],
-          element.tags?.["addr:state"]
-        ].filter(Boolean).join(", ") || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`;
-
-        facilities.push({
-          name,
-          type,
-          latitude: facilityLat,
-          longitude: facilityLon,
-          distance: Math.round(distance * 10) / 10,
-          phone,
-          address,
-          isOpen24Hours: element.tags?.["opening_hours"] === "24/7" || type === "hospital" || type === "police",
-          controlRoomNumber: (type === "police" || type === "hospital") ? phone : undefined,
-          source: 'osm'
-        });
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(overpassQuery)}`,
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ [OPENSTREETMAP] Successfully fetched data on attempt ${attempt}`);
+        
+        data.elements?.forEach((element: any) => {
+          const facilityLat = element.lat || element.center?.lat;
+          const facilityLon = element.lon || element.center?.lon;
+          
+          if (!facilityLat || !facilityLon) return;
+
+          const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
+          
+          let type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "fire_station" = "service_center";
+          let phone = "N/A";
+          
+          // Map OSM amenities to our categories
+          if (element.tags?.amenity === "hospital") {
+            type = "hospital";
+            phone = element.tags?.phone || hospitalPhone;
+          } else if (element.tags?.amenity === "clinic") {
+            type = "hospital";
+            phone = element.tags?.phone || hospitalPhone;
+          } else if (element.tags?.amenity === "pharmacy") {
+            type = "pharmacy";
+            phone = element.tags?.phone || "1800-102-1088";
+          } else if (element.tags?.amenity === "police") {
+            type = "police";
+            phone = element.tags?.phone || policePhone;
+          } else if (element.tags?.amenity === "fire_station") {
+            type = "fire_station";
+            phone = element.tags?.phone || "101";
+          } else if (element.tags?.amenity === "fuel") {
+            type = "fuel_station";
+            phone = element.tags?.phone || "1800-2333-555";
+          } else if (element.tags?.shop === "car_repair") {
+            type = "service_center";
+            phone = element.tags?.phone || "N/A";
+          }
+
+          const name = element.tags?.name || `${type.replace('_', ' ')} (${distance.toFixed(1)}km)`;
+          const address = [
+            element.tags?.["addr:street"],
+            element.tags?.["addr:city"],
+            element.tags?.["addr:state"]
+          ].filter(Boolean).join(", ") || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`;
+
+          facilities.push({
+            name,
+            type,
+            latitude: facilityLat,
+            longitude: facilityLon,
+            distance: Math.round(distance * 10) / 10,
+            phone,
+            address,
+            isOpen24Hours: element.tags?.["opening_hours"] === "24/7" || type === "hospital" || type === "police",
+            controlRoomNumber: (type === "police" || type === "hospital") ? phone : undefined,
+            source: 'osm'
+          });
+        });
+        
+        return facilities; // Success, return immediately
+      } else {
+        lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        console.warn(`⚠️ [OPENSTREETMAP] HTTP error on attempt ${attempt}:`, lastError);
+      }
+    } catch (error: any) {
+      lastError = error;
+      if (error.name === 'AbortError') {
+        console.warn(`⏱️ [OPENSTREETMAP] Timeout on attempt ${attempt} (${attempt === 1 ? '8s' : '12s'})`);
+      } else {
+        console.warn(`❌ [OPENSTREETMAP] Error on attempt ${attempt}:`, error.message);
+      }
+      
+      // If not the last attempt, wait before retrying
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay before retry
+      }
     }
-  } catch (error) {
-    console.error("❌ [OPENSTREETMAP] API error:", error);
   }
   
-  return facilities;
+  console.error(`❌ [OPENSTREETMAP] Failed after ${maxRetries} attempts:`, lastError?.message);
+  return facilities; // Return empty array if all retries failed
 }
 
 /**
@@ -645,48 +718,69 @@ function getFallbackFacilities(
  * Fallback to approximate location if API fails
  */
 export async function getLocationName(latitude: number, longitude: number): Promise<string> {
-  try {
-    // Try OpenStreetMap Nominatim (free reverse geocoding) with timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
-    
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
-      {
-        headers: {
-          'User-Agent': 'RideWithAlert/1.0'
-        },
-        signal: controller.signal
+  const maxRetries = 2;
+  let lastError: any;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 [NOMINATIM] Attempt ${attempt}/${maxRetries} to reverse geocode`);
+      
+      // Try OpenStreetMap Nominatim (free reverse geocoding) with timeout
+      const controller = new AbortController();
+      const timeoutMs = attempt === 1 ? 5000 : 8000; // 5s first attempt, 8s for retry
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+        {
+          headers: {
+            'User-Agent': 'RideWithAlert/1.0'
+          },
+          signal: controller.signal
+        }
+      );
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ [NOMINATIM] Successfully reverse geocoded on attempt ${attempt}`);
+        
+        if (data.display_name) {
+          // Extract city, state, country for cleaner display
+          const address = data.address;
+          const parts = [];
+          if (address.city || address.town || address.village) {
+            parts.push(address.city || address.town || address.village);
+          }
+          if (address.state) {
+            parts.push(address.state);
+          }
+          if (address.country) {
+            parts.push(address.country);
+          }
+          return parts.length > 0 ? parts.join(", ") : data.display_name;
+        }
+      } else {
+        lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
+        console.warn(`⚠️ [NOMINATIM] HTTP error on attempt ${attempt}:`, lastError);
       }
-    );
-    
-    clearTimeout(timeoutId);
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (data.display_name) {
-        // Extract city, state, country for cleaner display
-        const address = data.address;
-        const parts = [];
-        if (address.city || address.town || address.village) {
-          parts.push(address.city || address.town || address.village);
-        }
-        if (address.state) {
-          parts.push(address.state);
-        }
-        if (address.country) {
-          parts.push(address.country);
-        }
-        return parts.length > 0 ? parts.join(", ") : data.display_name;
+    } catch (error: any) {
+      lastError = error;
+      if (error.name === 'AbortError') {
+        console.warn(`⏱️ [NOMINATIM] Timeout on attempt ${attempt} (${attempt === 1 ? '5s' : '8s'})`);
+      } else {
+        console.warn(`❌ [NOMINATIM] Error on attempt ${attempt}:`, error.message);
       }
-    }
-  } catch (error: any) {
-    // Silently fail and use fallback
-    if (error.name !== 'AbortError') {
-      console.log("Reverse geocoding failed, using coordinates");
+      
+      // If not the last attempt, wait before retrying
+      if (attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 500)); // 500ms delay before retry
+      }
     }
   }
-
+  
+  console.warn(`⚠️ [NOMINATIM] Failed after ${maxRetries} attempts, using coordinates`);
   // Fallback to coordinates
   return `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
 }

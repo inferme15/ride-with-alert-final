@@ -41,42 +41,79 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
   const isPending = isAcknowledging || isApprovingReal;
 
   const startAlarm = async () => {
-    if (alarmRef.current.interval) return;
-    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-    if (audioContext.state === "suspended") {
-      try {
-        await audioContext.resume();
-      } catch {
-        setAlarmNeedsEnable(true);
-        setIsAlarmPlaying(false);
-        return;
-      }
+    console.log("🔊 [ALARM] Starting alarm...");
+    if (alarmRef.current.interval) {
+      console.log("🔊 [ALARM] Alarm already running");
+      return;
     }
-    setAlarmNeedsEnable(false);
-    const beep = () => {
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      oscillator.frequency.value = 800;
-      oscillator.type = "sine";
-      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-      oscillator.start(audioContext.currentTime);
-      oscillator.stop(audioContext.currentTime + 0.3);
-    };
-    beep();
-    const beepInterval = setInterval(beep, 500);
-    alarmRef.current.interval = beepInterval;
-    alarmRef.current.audioContext = audioContext;
-    setIsAlarmPlaying(true);
+    
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      console.log("🔊 [ALARM] AudioContext created, state:", audioContext.state);
+      
+      if (audioContext.state === "suspended") {
+        console.log("🔊 [ALARM] AudioContext suspended, attempting to resume...");
+        try {
+          await audioContext.resume();
+          console.log("🔊 [ALARM] AudioContext resumed successfully");
+        } catch (resumeErr) {
+          console.error("🔊 [ALARM] Failed to resume AudioContext:", resumeErr);
+          setAlarmNeedsEnable(true);
+          setIsAlarmPlaying(false);
+          return;
+        }
+      }
+      
+      setAlarmNeedsEnable(false);
+      
+      const beep = () => {
+        try {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          oscillator.frequency.value = 800;
+          oscillator.type = "sine";
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.3);
+        } catch (beepErr) {
+          console.error("🔊 [ALARM] Error creating beep:", beepErr);
+        }
+      };
+      
+      beep();
+      const beepInterval = setInterval(beep, 500);
+      alarmRef.current.interval = beepInterval;
+      alarmRef.current.audioContext = audioContext;
+      setIsAlarmPlaying(true);
+      console.log("🔊 [ALARM] Alarm started successfully");
+    } catch (err) {
+      console.error("🔊 [ALARM] Failed to start alarm:", err);
+      setAlarmNeedsEnable(true);
+      setIsAlarmPlaying(false);
+    }
   };
 
   useEffect(() => {
+    console.log("🚨 [EMERGENCY ALERT] Effect triggered:", {
+      hasEmergency: !!emergency,
+      status: emergency?.status,
+      isOpen,
+      emergencyId: emergency?.emergencyId
+    });
+
     if (emergency && emergency.status === "ACTIVE" && !isOpen) {
+      console.log("🚨 [EMERGENCY ALERT] Opening dialog and starting alarm");
       setIsOpen(true);
-      startAlarm();
+      // Start alarm immediately
+      startAlarm().catch(err => {
+        console.error("🚨 [EMERGENCY ALERT] Failed to start alarm:", err);
+        setAlarmNeedsEnable(true);
+      });
     } else if (!emergency || emergency.status === "ACKNOWLEDGED") {
+      console.log("🚨 [EMERGENCY ALERT] Closing dialog and stopping alarm");
       // Close dialog and stop alarm
       setIsOpen(false);
       setIsAlarmPlaying(false);

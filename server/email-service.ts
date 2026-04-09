@@ -1,70 +1,37 @@
-import dns from 'node:dns';
-import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import type { Driver, Emergency, Trip, Vehicle } from '../shared/schema';
 import { extractCitiesAlongRoute, generateRouteMapUrl } from './route-cities';
 
-// Render and many hosts have no working IPv6 route to Gmail; Node may still try AAAA first in some paths.
-// Prefer IPv4 for all DNS lookups in this process (Node 17+).
-if (typeof dns.setDefaultResultOrder === 'function') {
-  dns.setDefaultResultOrder('ipv4first');
+// Initialize SendGrid with API key
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const FROM_EMAIL = process.env.EMAIL_USER?.trim() || '';
+
+if (SENDGRID_API_KEY) {
+  sgMail.setApiKey(SENDGRID_API_KEY);
+  console.log('✅ SendGrid email service initialized');
+} else {
+  console.warn('⚠️ SENDGRID_API_KEY not set - email notifications will be skipped');
 }
 
-// QUICK FIX: Use correct nodemailer import with debug logging
-const emailUser = process.env.EMAIL_USER?.trim().replace(/\\n/g, '').replace(/\n/g, '');
-const emailPass = process.env.EMAIL_APP_PASSWORD?.trim().replace(/\\n/g, '').replace(/\n/g, '');
-
-const smtpHost = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
-const smtpPort = Number(process.env.SMTP_PORT || 587);
-const useImplicitSsl = smtpPort === 465;
-
-console.log('🔍 Email Debug Info:', {
-  hasEmailUser: !!emailUser,
-  emailUserLength: emailUser?.length,
-  hasEmailPass: !!emailPass,
-  emailPassLength: emailPass?.length,
-  emailUserSample: emailUser?.substring(0, 10) + '...',
-  emailPassSample: emailPass?.substring(0, 4) + '...',
-  smtpHost,
-  smtpPort,
-  useImplicitSsl,
-});
-
-const transporter = nodemailer.createTransport({
-  host: smtpHost,
-  port: smtpPort,
-  secure: useImplicitSsl,
-  requireTLS: !useImplicitSsl,
-  
-  auth: {
-    user: emailUser,
-    pass: emailPass,
-  },
-  connectionTimeout: 60_000,
-  greetingTimeout: 30_000,
-  socketTimeout: 60_000,
-  tls: {
-    minVersion: 'TLSv1.2',
-    servername: smtpHost,
-    family: 4, 
-  },
-  debug: process.env.SMTP_DEBUG === 'true',
-  logger: process.env.SMTP_DEBUG === 'true',
-});
-
-// Test connection on startup with detailed error info
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('❌ Email service connection failed:', error);
-    console.error('🔧 Error details:', {
-      code: (error as any).code,
-      command: (error as any).command,
-      response: (error as any).response,
-      responseCode: (error as any).responseCode
-    });
-  } else {
-    console.log('✅ Email service is ready to send emails');
+// Helper: send via SendGrid, swallow errors so they never crash the app
+async function sendMail(msg: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+}) {
+  if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    console.log('📧 Email skipped - SENDGRID_API_KEY or EMAIL_USER not configured');
+    return;
   }
-});
+  try {
+    const [response] = await sgMail.send({ ...msg, from: FROM_EMAIL });
+    console.log(`✅ Email sent to ${msg.to} | status: ${response.statusCode}`);
+  } catch (err: any) {
+    console.error('❌ SendGrid error:', err?.response?.body || err.message);
+    throw err;
+  }
+}
 
 // Email templates
 export class EmailService {
@@ -274,24 +241,22 @@ export class EmailService {
     routeData?: any
   ) {
     // Check if email is configured
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping email notification');
       return;
     }
 
-    const emailUser = process.env.EMAIL_USER?.trim().replace(/\\n/g, '');
     const driverEmail = driver.email?.trim();
 
     console.log('📧 Email config check:', {
-      emailUser: emailUser,
-      hasPassword: !!process.env.EMAIL_APP_PASSWORD,
+      hasApiKey: !!SENDGRID_API_KEY,
+      fromEmail: FROM_EMAIL,
       driverEmail: driverEmail,
-      emailUserRaw: process.env.EMAIL_USER
     });
 
     // Validate email addresses
-    if (!emailUser || !driverEmail) {
-      console.error('❌ Invalid email configuration:', { emailUser, driverEmail });
+    if (!driverEmail) {
+      console.error('❌ Invalid email configuration:', { driverEmail });
       return;
     }
 
@@ -306,18 +271,13 @@ export class EmailService {
       </html>
     `;
 
-    const mailOptions = {
-      from: emailUser,
+    console.log('📧 Attempting to send trip assignment email to:', driverEmail);
+    await sendMail({
       to: driverEmail,
       subject: `🚛 Trip Assignment - ${trip.tripId}`,
       text: textBody,
       html: htmlContent,
-    };
-
-    console.log('📧 Attempting to send email to:', driverEmail);
-    console.log('📧 From address:', emailUser);
-    const result = await transporter.sendMail(mailOptions);
-    console.log('✅ Trip assignment email sent successfully:', result.messageId);
+    });
   }
 
   // Send trip cancellation email
@@ -327,7 +287,7 @@ export class EmailService {
     vehicle: Vehicle
   ) {
     // Check if email is configured
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_APP_PASSWORD) {
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping trip cancellation email');
       return;
     }
@@ -342,21 +302,13 @@ export class EmailService {
       </html>
     `;
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    console.log('📧 Attempting to send trip cancellation email to:', driver.email);
+    await sendMail({
       to: driver.email,
       subject: `🚫 Trip Cancelled - ${trip.tripId}`,
       text: textBody,
       html: htmlContent,
-    };
-
-    try {
-      const result = await transporter.sendMail(mailOptions);
-      console.log('✅ Trip cancellation email sent successfully:', result.messageId);
-    } catch (error) {
-      console.error('❌ Error sending trip cancellation email:', error);
-      throw error;
-    }
+    });
   }
 
   // Send emergency alert to police and hospitals (only for real emergencies)
@@ -366,6 +318,11 @@ export class EmailService {
     vehicle: Vehicle,
     nearbyFacilities: any[]
   ) {
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+      console.log('📧 Email not configured - skipping emergency alert');
+      return;
+    }
+
     const mapUrl = `https://www.google.com/maps?q=${emergency.latitude},${emergency.longitude}`;
     const emergencyType = String(emergency.emergencyType || 'other');
     const emergencyTypeEmoji = {
@@ -454,22 +411,16 @@ export class EmailService {
     `;
 
     // Send to configured emergency recipients only
-    const testRecipients = process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [process.env.EMAIL_USER];
+    const testRecipients = process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [FROM_EMAIL];
 
     for (const recipient of testRecipients) {
-      const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: recipient,
+      console.log(`📧 Sending emergency alert to ${recipient}`);
+      await sendMail({
+        to: recipient.trim(),
         subject: `🚨 CONFIRMED REAL EMERGENCY - ${emergencyType.toUpperCase()} - ${driver.name}`,
+        text: `EMERGENCY ALERT: ${emergencyType.toUpperCase()} - ${driver.name} at ${emergency.latitude}, ${emergency.longitude}`,
         html: htmlContent,
-      };
-
-      try {
-        await transporter.sendMail(mailOptions);
-        console.log(`Real emergency alert sent to ${recipient}`);
-      } catch (error) {
-        console.error(`Error sending real emergency alert to ${recipient}:`, error);
-      }
+      });
     }
   }
 
@@ -479,6 +430,11 @@ export class EmailService {
     driver: Driver,
     vehicle: Vehicle
   ) {
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+      console.log('📧 Email not configured - skipping emergency contact alert');
+      return;
+    }
+
     if (!driver.emergencyContact || !driver.emergencyContactPhone) return;
 
     const mapUrl = `https://www.google.com/maps?q=${emergency.latitude},${emergency.longitude}`;
@@ -522,39 +478,42 @@ export class EmailService {
 
     // For demo, we'll use the driver's email as emergency contact email
     // In real implementation, you'd have emergency contact email in the schema
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: driver.email, // Replace with actual emergency contact email
+    console.log(`📧 Sending emergency contact alert to ${driver.email}`);
+    await sendMail({
+      to: driver.email,
       subject: `🚨 Emergency Alert - ${driver.name}`,
+      text: `Emergency alert for ${driver.name}: ${emergencyType.toUpperCase()}`,
       html: htmlContent,
-    };
-
-    try {
-      await transporter.sendMail(mailOptions);
-      console.log(`Emergency contact alert sent for ${driver.name}`);
-    } catch (error) {
-      console.error('Error sending emergency contact alert:', error);
-    }
+    });
   }
 
   // Test email configuration
   static async testConnection() {
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+      console.error('❌ SendGrid not configured - missing SENDGRID_API_KEY or EMAIL_USER');
+      return false;
+    }
     try {
-      await transporter.verify();
-      console.log('Email service is ready');
+      console.log('✅ SendGrid email service is ready');
       return true;
     } catch (error) {
-      console.error('Email service error:', error);
+      console.error('❌ SendGrid service error:', error);
       return false;
     }
   }
 
   // Send test email
   static async sendTestEmail(recipient: string, message: string) {
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+      console.log('📧 Email not configured - skipping test email');
+      return;
+    }
+
+    console.log(`📧 Sending test email to ${recipient}`);
+    await sendMail({
       to: recipient,
       subject: '🧪 RideWithAlert - Test Email',
+      text: message,
       html: `
         <!DOCTYPE html>
         <html>
@@ -579,14 +538,6 @@ export class EmailService {
         </body>
         </html>
       `,
-    };
-
-    try {
-      const result = await transporter.sendMail(mailOptions);
-      console.log(`Test email sent to ${recipient}:`, result.messageId);
-    } catch (error) {
-      console.error(`Error sending test email to ${recipient}:`, error);
-      throw error;
-    }
+    });
   }
 }
