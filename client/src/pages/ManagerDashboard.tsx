@@ -1559,7 +1559,7 @@ export default function ManagerDashboard() {
                                </SelectItem>
                              ))}
                              {(!availableVehicles || availableVehicles.length === 0) && (
-                               <SelectItem value="" disabled>
+                               <SelectItem value="no-vehicles" disabled>
                                  No available vehicles (all are on active trips)
                                </SelectItem>
                              )}
@@ -1580,7 +1580,7 @@ export default function ManagerDashboard() {
                                </SelectItem>
                              ))}
                              {(!availableDrivers || availableDrivers.length === 0) && (
-                               <SelectItem value="" disabled>
+                               <SelectItem value="no-drivers" disabled>
                                  No available drivers (all are on active trips)
                                </SelectItem>
                              )}
