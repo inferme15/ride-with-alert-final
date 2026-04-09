@@ -341,7 +341,7 @@ async function searchOpenStreetMap(
 
       // Add timeout and abort controller - increase timeout for retries
       const controller = new AbortController();
-      const timeoutMs = attempt === 1 ? 8000 : 12000; // 8s first attempt, 12s for retry
+      const timeoutMs = attempt === 1 ? 15000 : 25000; // 15s first attempt, 25s for retry
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch('https://overpass-api.de/api/interpreter', {
@@ -727,7 +727,7 @@ export async function getLocationName(latitude: number, longitude: number): Prom
       
       // Try OpenStreetMap Nominatim (free reverse geocoding) with timeout
       const controller = new AbortController();
-      const timeoutMs = attempt === 1 ? 5000 : 8000; // 5s first attempt, 8s for retry
+      const timeoutMs = attempt === 1 ? 10000 : 15000; // 10s first attempt, 15s for retry
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       
       const response = await fetch(
@@ -768,7 +768,7 @@ export async function getLocationName(latitude: number, longitude: number): Prom
     } catch (error: any) {
       lastError = error;
       if (error.name === 'AbortError') {
-        console.warn(`⏱️ [NOMINATIM] Timeout on attempt ${attempt} (${attempt === 1 ? '5s' : '8s'})`);
+        console.warn(`⏱️ [NOMINATIM] Timeout on attempt ${attempt} (${attempt === 1 ? '10s' : '15s'})`);
       } else {
         console.warn(`❌ [NOMINATIM] Error on attempt ${attempt}:`, error.message);
       }
