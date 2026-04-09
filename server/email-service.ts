@@ -1,10 +1,21 @@
+import dns from 'node:dns';
 import nodemailer from 'nodemailer';
 import type { Driver, Emergency, Trip, Vehicle } from '../shared/schema';
 import { extractCitiesAlongRoute, generateRouteMapUrl } from './route-cities';
 
+// Render and many hosts have no working IPv6 route to Gmail; Node may still try AAAA first in some paths.
+// Prefer IPv4 for all DNS lookups in this process (Node 17+).
+if (typeof dns.setDefaultResultOrder === 'function') {
+  dns.setDefaultResultOrder('ipv4first');
+}
+
 // QUICK FIX: Use correct nodemailer import with debug logging
 const emailUser = process.env.EMAIL_USER?.trim().replace(/\\n/g, '').replace(/\n/g, '');
 const emailPass = process.env.EMAIL_APP_PASSWORD?.trim().replace(/\\n/g, '').replace(/\n/g, '');
+
+const smtpHost = process.env.SMTP_HOST?.trim() || 'smtp.gmail.com';
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const useImplicitSsl = smtpPort === 465;
 
 console.log('🔍 Email Debug Info:', {
   hasEmailUser: !!emailUser,
@@ -12,17 +23,30 @@ console.log('🔍 Email Debug Info:', {
   hasEmailPass: !!emailPass,
   emailPassLength: emailPass?.length,
   emailUserSample: emailUser?.substring(0, 10) + '...',
-  emailPassSample: emailPass?.substring(0, 4) + '...'
+  emailPassSample: emailPass?.substring(0, 4) + '...',
+  smtpHost,
+  smtpPort,
+  useImplicitSsl,
 });
 
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: smtpHost,
+  port: smtpPort,
+  secure: useImplicitSsl,
+  requireTLS: !useImplicitSsl,
   auth: {
     user: emailUser,
     pass: emailPass,
   },
-  debug: true, // Enable debug logging
-  logger: true // Enable logger
+  connectionTimeout: 60_000,
+  greetingTimeout: 30_000,
+  socketTimeout: 60_000,
+  tls: {
+    minVersion: 'TLSv1.2',
+    servername: smtpHost,
+  },
+  debug: process.env.SMTP_DEBUG === 'true',
+  logger: process.env.SMTP_DEBUG === 'true',
 });
 
 // Test connection on startup with detailed error info
@@ -288,16 +312,10 @@ export class EmailService {
       html: htmlContent,
     };
 
-    try {
-      console.log('📧 Attempting to send email to:', driverEmail);
-      console.log('📧 From address:', emailUser);
-      const result = await transporter.sendMail(mailOptions);
-      console.log('✅ Trip assignment email sent successfully:', result.messageId);
-    } catch (error) {
-      console.error('❌ Error sending trip assignment email:', error);
-      // Don't fail the trip assignment if email fails
-      console.log('⚠️ Trip assignment continues despite email failure');
-    }
+    console.log('📧 Attempting to send email to:', driverEmail);
+    console.log('📧 From address:', emailUser);
+    const result = await transporter.sendMail(mailOptions);
+    console.log('✅ Trip assignment email sent successfully:', result.messageId);
   }
 
   // Send trip cancellation email
