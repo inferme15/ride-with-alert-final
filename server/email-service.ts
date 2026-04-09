@@ -4,7 +4,7 @@ import { extractCitiesAlongRoute, generateRouteMapUrl } from './route-cities';
 
 // Initialize SendGrid with API key
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.EMAIL_USER?.trim() || '';
+const FROM_EMAIL = process.env.SENDER_EMAIL?.trim() || '';
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
