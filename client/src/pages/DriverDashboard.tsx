@@ -31,6 +31,7 @@ export default function DriverDashboard() {
   const [simulatedPosition, setSimulatedPosition] = useState<[number, number] | null>(null);
   const [simulationProgress, setSimulationProgress] = useState(0);
   const [driverNearbyFacilities, setDriverNearbyFacilities] = useState<any[]>([]);
+  const nearbyFacilitiesRef = useRef<any[]>([]);
   
   // Enhanced GPS tracking states
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
@@ -45,12 +46,35 @@ export default function DriverDashboard() {
   const [realTripProgress, setRealTripProgress] = useState(0);
   const [distanceTraveled, setDistanceTraveled] = useState(0);
   const [totalRouteDistance, setTotalRouteDistance] = useState(0);
+
+  // Auto-complete (arrival) state
+  const [isAutoCompletingTrip, setIsAutoCompletingTrip] = useState(false);
   
   // Refs
   const webcamRef = useRef<ReactWebcam>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const lastEmitAtRef = useRef(0);
+  const lastEmittedLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const arrivalCandidateSinceRef = useRef<number | null>(null);
+  const autoCompleteRequestedRef = useRef(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraMountKey, setCameraMountKey] = useState(0);
+
+  const requestEmergencyMedia = async (): Promise<MediaStream> => {
+    const videoConstraints = {
+      width: { ideal: 1280 },
+      height: { ideal: 720 },
+    };
+    try {
+      // Try camera + mic first.
+      return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: true });
+    } catch (err) {
+      console.warn("⚠️ [CAMERA] Camera+mic request failed, retrying video-only:", err);
+      // Fall back to video-only so SOS still works even if mic permission is denied.
+      return await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
+    }
+  };
 
   // Helper function to calculate distance between two GPS points (Haversine formula)
   const calculateDistance = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
@@ -62,6 +86,10 @@ export default function DriverDashboard() {
               Math.sin(dLng/2) * Math.sin(dLng/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     return R * c; // Distance in kilometers
+  };
+
+  const calculateDistanceMeters = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    return calculateDistance(lat1, lng1, lat2, lng2) * 1000;
   };
 
   // Calculate trip progress based on real GPS location
@@ -85,6 +113,73 @@ export default function DriverDashboard() {
     return progress;
   };
 
+  const maybeAutoCompleteTrip = async (currentLat: number, currentLng: number) => {
+    // Guardrails: only for ACTIVE trips with valid destination coords.
+    if (!trip || trip.status !== "ACTIVE") return;
+    if (!trip.tripId) return;
+    if (!trip.endLatitude || !trip.endLongitude) return;
+    if (isEmergencyActive) return;
+    if (autoCompleteRequestedRef.current) return;
+
+    const endLat = parseFloat(trip.endLatitude || "");
+    const endLng = parseFloat(trip.endLongitude || "");
+    if (Number.isNaN(endLat) || Number.isNaN(endLng)) return;
+
+    // Tuning knobs (MVP defaults)
+    const ARRIVAL_RADIUS_METERS = 120; // within ~120m
+    const ARRIVAL_HOLD_MS = 8000; // continuously for ~8s
+
+    const dMeters = calculateDistanceMeters(currentLat, currentLng, endLat, endLng);
+    const inside = dMeters <= ARRIVAL_RADIUS_METERS;
+
+    const now = Date.now();
+    if (!inside) {
+      arrivalCandidateSinceRef.current = null;
+      return;
+    }
+
+    if (!arrivalCandidateSinceRef.current) {
+      arrivalCandidateSinceRef.current = now;
+      return;
+    }
+
+    const insideForMs = now - arrivalCandidateSinceRef.current;
+    if (insideForMs < ARRIVAL_HOLD_MS) return;
+
+    // We consider the driver "arrived". Trigger completion once.
+    autoCompleteRequestedRef.current = true;
+    setIsAutoCompletingTrip(true);
+
+    try {
+      const resp = await fetch(`/api/trips/${trip.tripId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+
+      if (!resp.ok) {
+        // Allow retry if server rejects (e.g., transient failure).
+        autoCompleteRequestedRef.current = false;
+        throw new Error(`Auto-complete failed (${resp.status})`);
+      }
+
+      toast({
+        title: "Arrived at destination",
+        description: "Trip marked as completed.",
+        duration: 4000,
+      });
+    } catch (err: any) {
+      console.error("❌ [AUTO-COMPLETE] Failed to auto-complete trip:", err);
+      setIsAutoCompletingTrip(false);
+      toast({
+        title: "Auto-complete failed",
+        description: err?.message || "Could not complete trip automatically. Manager can complete manually.",
+        variant: "destructive",
+        duration: 6000,
+      });
+    }
+  };
+
   // Fetch nearby facilities based on current GPS location
   const fetchNearbyFacilities = async (lat: number, lng: number) => {
     try {
@@ -95,6 +190,7 @@ export default function DriverDashboard() {
         const facilities = await response.json();
         console.log(`✅ [FACILITIES] Found ${facilities.length} nearby facilities`);
         setDriverNearbyFacilities(facilities);
+        nearbyFacilitiesRef.current = Array.isArray(facilities) ? facilities : [];
         return facilities;
       } else {
         console.warn('⚠️ [FACILITIES] Failed to fetch facilities:', response.status);
@@ -105,6 +201,11 @@ export default function DriverDashboard() {
       return [];
     }
   };
+
+  // Keep latest facilities in a ref so socket emits are always in sync.
+  useEffect(() => {
+    nearbyFacilitiesRef.current = driverNearbyFacilities;
+  }, [driverNearbyFacilities]);
 
   // Fetch current trip info with faster loading
   const { data: tripData, isLoading: tripLoading } = useCurrentTrip();
@@ -157,7 +258,8 @@ export default function DriverDashboard() {
           });
           emit(events.LOCATION_UPDATE, {
             vehicleNumber: trip.vehicleNumber,
-            location: realLocation
+            location: realLocation,
+            nearbyFacilities: nearbyFacilitiesRef.current
           });
         }
       },
@@ -200,6 +302,11 @@ export default function DriverDashboard() {
 
     console.log('🔄 [CONTINUOUS GPS] Setting up real-time GPS tracking...');
     setGpsConnectionStatus('connecting');
+
+    // Reset auto-complete state when trip changes / tracking restarts
+    arrivalCandidateSinceRef.current = null;
+    autoCompleteRequestedRef.current = false;
+    setIsAutoCompletingTrip(false);
     
     // Set up continuous location watching with optimized settings for real-time tracking
     const watchId = navigator.geolocation.watchPosition(
@@ -227,6 +334,10 @@ export default function DriverDashboard() {
         const progress = calculateTripProgress(realLocation.lat, realLocation.lng);
         setRealTripProgress(progress);
         console.log(`📊 [TRIP PROGRESS] Real progress: ${progress.toFixed(1)}% (${distanceTraveled.toFixed(1)}km / ${totalRouteDistance.toFixed(1)}km)`);
+
+        // Attempt auto-completion when close to destination.
+        // Fire-and-forget; internal guards prevent spamming.
+        void maybeAutoCompleteTrip(realLocation.lat, realLocation.lng);
         
         // Determine GPS connection quality based on accuracy
         if (pos.coords.accuracy <= 10) {
@@ -237,18 +348,31 @@ export default function DriverDashboard() {
           setGpsConnectionStatus('weak');
         }
         
-        // Send real GPS to manager dashboard with additional metadata
-        emit(events.LOCATION_UPDATE, {
+        // Throttle socket traffic to avoid flooding manager dashboard and server logs.
+        const now = Date.now();
+        const lastLocation = lastEmittedLocationRef.current;
+        const movedEnough =
+          !lastLocation ||
+          Math.abs(lastLocation.lat - realLocation.lat) > 0.00001 ||
+          Math.abs(lastLocation.lng - realLocation.lng) > 0.00001;
+        const enoughTimeElapsed = now - lastEmitAtRef.current >= 1000;
+
+        if (movedEnough || enoughTimeElapsed) {
+          lastEmitAtRef.current = now;
+          lastEmittedLocationRef.current = { lat: realLocation.lat, lng: realLocation.lng };
+          emit(events.LOCATION_UPDATE, {
           vehicleNumber: trip.vehicleNumber,
           location: realLocation,
           accuracy: pos.coords.accuracy,
           speed: pos.coords.speed || 0,
           heading: pos.coords.heading || 0,
-          timestamp: Date.now(),
+          timestamp: now,
           tripProgress: progress,
           distanceTraveled: distanceTraveled,
-          totalDistance: totalRouteDistance
-        });
+          totalDistance: totalRouteDistance,
+          nearbyFacilities: nearbyFacilitiesRef.current
+          });
+        }
       },
       (error) => {
         console.error('❌ [CONTINUOUS GPS] Watch error:', error);
@@ -276,7 +400,7 @@ export default function DriverDashboard() {
         setGpsConnectionStatus('connecting');
       }
     };
-  }, [trip?.vehicleNumber, emit, events, toast, distanceTraveled, totalRouteDistance]);
+  }, [trip?.vehicleNumber, trip?.tripId, trip?.status, trip?.endLatitude, trip?.endLongitude, isEmergencyActive, emit, events, toast]);
 
   // Monitor GPS connection health
   useEffect(() => {
@@ -336,14 +460,7 @@ export default function DriverDashboard() {
         setCameraError('Camera stream not ready');
         
         // Try to get stream manually as fallback
-        navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: 'user'
-          }, 
-          audio: true 
-        })
+        requestEmergencyMedia()
           .then(newStream => {
             console.log('✅ [VIDEO] Got fallback camera stream');
             setCameraError(null);
@@ -594,14 +711,7 @@ export default function DriverDashboard() {
     // Request camera permissions and validate stream
     const initializeCamera = async () => {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { 
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            facingMode: 'user'
-          }, 
-          audio: true 
-        });
+        const stream = await requestEmergencyMedia();
         
         console.log('✅ [CAMERA] Camera stream obtained successfully');
         console.log('📊 [CAMERA] Video tracks:', stream.getVideoTracks().length);
@@ -709,14 +819,16 @@ export default function DriverDashboard() {
       return;
     }
     
-    // Check camera readiness before proceeding
+    // Do not hard-block SOS on camera state. Recording logic already has
+    // fallback getUserMedia handling (including video-only mode).
     if (!cameraReady) {
-      toast({ 
-        title: "Camera not ready", 
-        description: cameraError || "Please wait for camera to initialize.", 
-        variant: "destructive" 
+      toast({
+        title: "Camera warming up",
+        description: cameraError
+          ? `${cameraError}. Sending SOS and retrying camera fallback.`
+          : "Proceeding with SOS and attempting camera fallback.",
+        variant: "destructive",
       });
-      return;
     }
     
     // Prevent multiple rapid clicks
@@ -1288,7 +1400,8 @@ export default function DriverDashboard() {
             {/* Camera Preview - Enhanced with status indicators */}
             <div className="relative rounded-xl overflow-hidden bg-black h-[200px] md:h-[300px] border border-slate-700 shadow-2xl">
               <ReactWebcam
-                audio={true}
+                key={cameraMountKey}
+                audio={false}
                 ref={webcamRef}
                 screenshotFormat="image/jpeg"
                 className="w-full h-full object-cover"
@@ -1296,7 +1409,6 @@ export default function DriverDashboard() {
                 videoConstraints={{
                   width: { ideal: 1280 },
                   height: { ideal: 720 },
-                  facingMode: 'user'
                 }}
                 onUserMedia={() => {
                   console.log('✅ [CAMERA] ReactWebcam stream ready');
@@ -1306,7 +1418,13 @@ export default function DriverDashboard() {
                 onUserMediaError={(error) => {
                   console.error('❌ [CAMERA] ReactWebcam error:', error);
                   setCameraReady(false);
-                  setCameraError('Camera failed to start');
+                  const message =
+                    (error as any)?.name === 'NotReadableError'
+                      ? 'Camera is in use by another app'
+                      : (error as any)?.name === 'NotAllowedError'
+                      ? 'Camera permission denied'
+                      : 'Camera failed to start';
+                  setCameraError(message);
                 }}
               />
               <div className="absolute top-2 left-2 md:top-3 md:left-3 bg-black/60 backdrop-blur px-2 py-1 rounded text-xs flex items-center gap-2">
@@ -1317,8 +1435,20 @@ export default function DriverDashboard() {
                 {cameraReady ? 'REC READY' : cameraError ? 'CAM ERROR' : 'LOADING...'}
               </div>
               {cameraError && (
-                <div className="absolute bottom-2 left-2 right-2 bg-red-900/80 backdrop-blur px-2 py-1 rounded text-xs text-red-200">
-                  {cameraError}
+                <div className="absolute bottom-2 left-2 right-2 bg-red-900/80 backdrop-blur px-2 py-2 rounded text-xs text-red-200 flex items-center justify-between gap-2">
+                  <span>{cameraError}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2 border-red-300 text-red-100 hover:bg-red-800"
+                    onClick={() => {
+                      setCameraError(null);
+                      setCameraReady(false);
+                      setCameraMountKey((v) => v + 1);
+                    }}
+                  >
+                    Retry Camera
+                  </Button>
                 </div>
               )}
             </div>

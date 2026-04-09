@@ -32,6 +32,7 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
   const { mutate: approveRealEmergency, isPending: isApprovingReal } = useApproveRealEmergency();
   const [isOpen, setIsOpen] = useState(false);
   const [isAlarmPlaying, setIsAlarmPlaying] = useState(false);
+  const [alarmNeedsEnable, setAlarmNeedsEnable] = useState(false);
   const [decisionCountdown, setDecisionCountdown] = useState(0);
   const [showVideoSection, setShowVideoSection] = useState(true);
   const { subscribe, events } = useSocket();
@@ -39,47 +40,47 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
 
   const isPending = isAcknowledging || isApprovingReal;
 
+  const startAlarm = async () => {
+    if (alarmRef.current.interval) return;
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (audioContext.state === "suspended") {
+      try {
+        await audioContext.resume();
+      } catch {
+        setAlarmNeedsEnable(true);
+        setIsAlarmPlaying(false);
+        return;
+      }
+    }
+    setAlarmNeedsEnable(false);
+    const beep = () => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.frequency.value = 800;
+      oscillator.type = "sine";
+      gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.3);
+    };
+    beep();
+    const beepInterval = setInterval(beep, 500);
+    alarmRef.current.interval = beepInterval;
+    alarmRef.current.audioContext = audioContext;
+    setIsAlarmPlaying(true);
+  };
+
   useEffect(() => {
     if (emergency && emergency.status === "ACTIVE" && !isOpen) {
       setIsOpen(true);
-      setIsAlarmPlaying(true);
-      // Play alarm sound - create a beeping alarm using Web Audio API
-      const playAlarm = () => {
-        if (!alarmRef.current.interval) {
-          // Create a simple beeping alarm using Web Audio API
-          const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-          
-          const beep = () => {
-            const oscillator = audioContext.createOscillator();
-            const gainNode = audioContext.createGain();
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioContext.destination);
-            
-            oscillator.frequency.value = 800;
-            oscillator.type = 'sine';
-            
-            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
-            
-            oscillator.start(audioContext.currentTime);
-            oscillator.stop(audioContext.currentTime + 0.3);
-          };
-          
-          beep();
-          const beepInterval = setInterval(beep, 500);
-          
-          // Store interval ID and context for cleanup
-          alarmRef.current.interval = beepInterval;
-          alarmRef.current.audioContext = audioContext;
-        }
-      };
-      
-      playAlarm();
+      startAlarm();
     } else if (!emergency || emergency.status === "ACKNOWLEDGED") {
       // Close dialog and stop alarm
       setIsOpen(false);
       setIsAlarmPlaying(false);
+      setAlarmNeedsEnable(false);
       // Stop alarm
       if (alarmRef.current.interval) {
         clearInterval(alarmRef.current.interval);
@@ -263,6 +264,18 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
               <div className="mt-2 text-sm font-semibold">
                 {isAlarmPlaying ? "🔊 Alarm Active" : "🔇 Alarm Muted"}
               </div>
+              {alarmNeedsEnable && (
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-red-300 text-red-700 hover:bg-red-50"
+                    onClick={() => startAlarm()}
+                  >
+                    Enable Alarm Sound
+                  </Button>
+                </div>
+              )}
               {decisionCountdown > 0 ? (
                 <div className="mt-1 text-lg font-bold text-amber-700 bg-amber-100 px-3 py-1 rounded-full inline-block">
                   Decision in {decisionCountdown}s

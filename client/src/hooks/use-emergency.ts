@@ -66,12 +66,12 @@ export function useTriggerEmergency() {
         console.log('✅ [EMERGENCY HOOK] Success response:', responseData);
         return responseData;
         
-      } catch (error) {
+      } catch (error: any) {
         console.error('❌ [EMERGENCY HOOK] Network error:', error);
         console.error('❌ [EMERGENCY HOOK] Error details:', {
-          name: error.name,
-          message: error.message,
-          stack: error.stack
+          name: error?.name,
+          message: error?.message,
+          stack: error?.stack
         });
         throw error;
       }
@@ -132,7 +132,11 @@ export function useApproveRealEmergency() {
   return useMutation({
     mutationFn: async (emergencyId: number) => {
       console.log('🚨 [REAL EMERGENCY] Approving real emergency:', emergencyId);
-      const res = await fetch("/api/emergency/approve-real", {
+      // Use the consolidated approve endpoint because it:
+      // - stops active trip
+      // - emits stop/ack socket events
+      // - sends authority emails
+      const res = await fetch("/api/emergency/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ emergencyId }),

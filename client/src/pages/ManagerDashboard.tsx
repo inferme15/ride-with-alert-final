@@ -326,6 +326,7 @@ export default function ManagerDashboard() {
       speed?: number; 
       heading?: number; 
       timestamp?: number;
+      nearbyFacilities?: any[];
     }) => {
       console.log('🎯 Manager Dashboard received GPS update:', data);
       
@@ -343,27 +344,12 @@ export default function ManagerDashboard() {
         }
       }));
       
-      // Dynamically fetch nearby facilities to match the live driver movement
-      // Throttle to avoid excessive API calls (only fetch once every 30 seconds per vehicle)
-      const now = Date.now();
-      const lastFetch = facilitiesFetchAtRef.current[data.vehicleNumber] || 0;
-      if (now - lastFetch > 30000) {
-        facilitiesFetchAtRef.current[data.vehicleNumber] = now;
-        fetch(`/api/emergency/nearby-facilities?latitude=${data.location.lat}&longitude=${data.location.lng}`)
-          .then(res => {
-            if (res.ok) return res.json();
-            return null;
-          })
-          .then(facilities => {
-            if (facilities && Array.isArray(facilities)) {
-              setLiveNearbyFacilitiesByVehicle(prev => ({
-                ...prev,
-                [data.vehicleNumber]: facilities
-              }));
-              console.log(`🏥 [FACILITIES] Manager Dash dynamically updated facilities for ${data.vehicleNumber}`);
-            }
-          })
-          .catch(err => console.error('Failed to update live facilities on Manager Dash:', err));
+      // Facilities must come ONLY from the driver device.
+      if (Array.isArray(data.nearbyFacilities)) {
+        setLiveNearbyFacilitiesByVehicle(prev => ({
+          ...prev,
+          [data.vehicleNumber]: data.nearbyFacilities || []
+        }));
       }
       
       // Update vehicle tracking status

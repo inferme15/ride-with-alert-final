@@ -187,7 +187,9 @@ export async function registerRoutes(
 
   // Email test endpoint for review/demo.
   app.post("/api/notifications/test", async (req, res) => {
-    const testRecipients = process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [process.env.EMAIL_USER];
+    const testRecipients = (process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [process.env.EMAIL_USER])
+      .map((s) => s?.trim())
+      .filter((s): s is string => Boolean(s));
     const customMessage = req.body?.message;
 
     const defaultMessage = `TEST ALERT (RideWithAlert)

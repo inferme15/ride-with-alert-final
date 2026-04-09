@@ -431,4 +431,5 @@ export const socketEvents = {
   RECEIVE_ACKNOWLEDGEMENT: 'receive_acknowledgement',
   NEW_EMERGENCY: 'new_emergency',
   EMERGENCY_ACKNOWLEDGED: 'emergency_acknowledged',
+  REAL_EMERGENCY_CONFIRMED: 'real_emergency_confirmed',
 } as const;
