@@ -34,6 +34,7 @@ const transporter = nodemailer.createTransport({
   port: smtpPort,
   secure: useImplicitSsl,
   requireTLS: !useImplicitSsl,
+  
   auth: {
     user: emailUser,
     pass: emailPass,
@@ -44,6 +45,7 @@ const transporter = nodemailer.createTransport({
   tls: {
     minVersion: 'TLSv1.2',
     servername: smtpHost,
+    family: 4, 
   },
   debug: process.env.SMTP_DEBUG === 'true',
   logger: process.env.SMTP_DEBUG === 'true',
