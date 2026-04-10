@@ -1,34 +1,52 @@
-import sgMail from '@sendgrid/mail';
+import nodemailer from 'nodemailer';
 import type { Driver, Emergency, Trip, Vehicle } from '../shared/schema';
 import { extractCitiesAlongRoute, generateRouteMapUrl } from './route-cities';
 
-// Initialize SendGrid with API key
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const FROM_EMAIL = process.env.SENDER_EMAIL?.trim() || '';
+// Initialize AWS SES with SMTP credentials
+const AWS_SES_USER = process.env.AWS_SES_USER;
+const AWS_SES_PASSWORD = process.env.AWS_SES_PASSWORD;
+const AWS_SES_REGION = process.env.AWS_SES_REGION || 'ap-south-1';
+const FROM_EMAIL = process.env.SENDER_EMAIL?.trim() || 'kitika1508@gmail.com';
 
-if (SENDGRID_API_KEY) {
-  sgMail.setApiKey(SENDGRID_API_KEY);
-  console.log('✅ SendGrid email service initialized');
+let transporter: nodemailer.Transporter | null = null;
+
+if (AWS_SES_USER && AWS_SES_PASSWORD) {
+  transporter = nodemailer.createTransport({
+    host: `email-smtp.${AWS_SES_REGION}.amazonaws.com`,
+    port: 587,
+    secure: false,
+    auth: {
+      user: AWS_SES_USER,
+      pass: AWS_SES_PASSWORD,
+    },
+  });
+  console.log('✅ AWS SES email service initialized');
 } else {
-  console.warn('⚠️ SENDGRID_API_KEY not set - email notifications will be skipped');
+  console.warn('⚠️ AWS_SES_USER or AWS_SES_PASSWORD not set - email notifications will be skipped');
 }
 
-// Helper: send via SendGrid, swallow errors so they never crash the app
+// Helper: send via AWS SES, swallow errors so they never crash the app
 async function sendMail(msg: {
   to: string;
   subject: string;
   text: string;
   html: string;
 }) {
-  if (!SENDGRID_API_KEY || !FROM_EMAIL) {
-    console.log('📧 Email skipped - SENDGRID_API_KEY or EMAIL_USER not configured');
+  if (!transporter || !FROM_EMAIL) {
+    console.log('📧 Email skipped - AWS SES not configured');
     return;
   }
   try {
-    const [response] = await sgMail.send({ ...msg, from: FROM_EMAIL });
-    console.log(`✅ Email sent to ${msg.to} | status: ${response.statusCode}`);
+    const response = await transporter.sendMail({
+      from: FROM_EMAIL,
+      to: msg.to,
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+    });
+    console.log(`✅ Email sent to ${msg.to} | messageId: ${response.messageId}`);
   } catch (err: any) {
-    console.error('❌ SendGrid error:', err?.response?.body || err.message);
+    console.error('❌ AWS SES error:', err?.message || err);
     throw err;
   }
 }
@@ -241,7 +259,7 @@ export class EmailService {
     routeData?: any
   ) {
     // Check if email is configured
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    if (!transporter || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping email notification');
       return;
     }
@@ -249,7 +267,7 @@ export class EmailService {
     const driverEmail = driver.email?.trim();
 
     console.log('📧 Email config check:', {
-      hasApiKey: !!SENDGRID_API_KEY,
+      hasTransporter: !!transporter,
       fromEmail: FROM_EMAIL,
       driverEmail: driverEmail,
     });
@@ -287,7 +305,7 @@ export class EmailService {
     vehicle: Vehicle
   ) {
     // Check if email is configured
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    if (!transporter || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping trip cancellation email');
       return;
     }
@@ -318,7 +336,7 @@ export class EmailService {
     vehicle: Vehicle,
     nearbyFacilities: any[]
   ) {
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    if (!transporter || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping emergency alert');
       return;
     }
@@ -430,7 +448,7 @@ export class EmailService {
     driver: Driver,
     vehicle: Vehicle
   ) {
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    if (!transporter || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping emergency contact alert');
       return;
     }
@@ -489,22 +507,23 @@ export class EmailService {
 
   // Test email configuration
   static async testConnection() {
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
-      console.error('❌ SendGrid not configured - missing SENDGRID_API_KEY or EMAIL_USER');
+    if (!transporter || !FROM_EMAIL) {
+      console.error('❌ AWS SES not configured - missing AWS_SES_USER or AWS_SES_PASSWORD');
       return false;
     }
     try {
-      console.log('✅ SendGrid email service is ready');
+      await transporter.verify();
+      console.log('✅ AWS SES email service is ready');
       return true;
     } catch (error) {
-      console.error('❌ SendGrid service error:', error);
+      console.error('❌ AWS SES service error:', error);
       return false;
     }
   }
 
   // Send test email
   static async sendTestEmail(recipient: string, message: string) {
-    if (!SENDGRID_API_KEY || !FROM_EMAIL) {
+    if (!transporter || !FROM_EMAIL) {
       console.log('📧 Email not configured - skipping test email');
       return;
     }
