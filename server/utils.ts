@@ -59,23 +59,18 @@ export async function findNearbyFacilities(
     const osmFacilities = await searchOpenStreetMap(latitude, longitude, radius, policePhone, hospitalPhone);
     console.log(`🔴 [CRITICAL] OpenStreetMap returned ${osmFacilities.length} facilities`);
     
-    // 2. SECONDARY: Try Google Places API
-    console.log(`🔴 [CRITICAL] Attempting Google Places API...`);
-    const googleFacilities = await searchGooglePlaces(latitude, longitude, radius);
-    console.log(`🔴 [CRITICAL] Google Places returned ${googleFacilities.length} facilities`);
-    
-    // 3. FALLBACK ONLY: Hardcoded database (0.1%)
+    // 2. FALLBACK ONLY: Hardcoded database (0.1%)
     console.log(`🔴 [CRITICAL] Getting hardcoded database as fallback...`);
     const hardcodedFacilities = searchHardcodedDatabase(latitude, longitude, radius/1000, policePhone, hospitalPhone);
     console.log(`🔴 [CRITICAL] Hardcoded DB returned ${hardcodedFacilities.length} facilities`);
     
-    // 4. Combine all sources - APIs first, then hardcoded
-    const combinedFacilities = combineAndDeduplicate([...osmFacilities, ...googleFacilities, ...hardcodedFacilities]);
+    // 3. Combine all sources - APIs first, then hardcoded
+    const combinedFacilities = combineAndDeduplicate([...osmFacilities, ...hardcodedFacilities]);
     console.log(`🔴 [CRITICAL] Combined total: ${combinedFacilities.length} unique facilities`);
     
     allFacilities = combinedFacilities;
     
-    // 5. Check if we have enough facilities from APIs
+    // 4. Check if we have enough facilities from APIs
     const apiOnlyFacilities = combinedFacilities.filter(f => f.source !== 'hardcoded');
     console.log(`🔴 [CRITICAL] API facilities: ${apiOnlyFacilities.length}, Hardcoded: ${combinedFacilities.length - apiOnlyFacilities.length}`);
     
@@ -92,7 +87,7 @@ export async function findNearbyFacilities(
     }
   }
   
-  // 6. Group by category and limit to max 3 per category
+  // 5. Group by category and limit to max 3 per category
   const groupedFacilities = groupFacilitiesByCategory(allFacilities);
   
   console.log(`\n🔴 [CRITICAL] FINAL RESULT: ${groupedFacilities.length} facilities`);
@@ -193,149 +188,6 @@ function searchHardcodedDatabase(
   });
 
   console.log(`🔵 [HARDCODED DB] Filtered to ${facilities.length} facilities within ${maxDistanceKm}km`);
-  return facilities;
-}
-
-/**
- * Search Google Places API for nearby facilities with retry logic
- */
-async function searchGooglePlaces(
-  latitude: number, 
-  longitude: number, 
-  radius: number
-): Promise<NearbyFacility[]> {
-  const facilities: NearbyFacility[] = [];
-  
-  // Google Places API key (you'll need to add this to environment variables)
-  const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-  
-  if (!apiKey || apiKey === 'your_google_places_api_key_here') {
-    console.log("⚠️ [GOOGLE PLACES] API key not configured, skipping Google search");
-    return facilities;
-  }
-  
-  // Define search types for different facility categories
-  const searchTypes = [
-    { type: 'hospital', category: 'hospital' },
-    { type: 'doctor', category: 'hospital' },
-    { type: 'pharmacy', category: 'pharmacy' },
-    { type: 'police', category: 'police' },
-    { type: 'fire_station', category: 'fire_station' },
-    { type: 'gas_station', category: 'fuel_station' },
-    { type: 'car_repair', category: 'service_center' }
-  ];
-  
-  const maxRetries = 3;
-  
-  try {
-    for (const search of searchTypes) {
-      let lastError: any;
-      let success = false;
-      
-      for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-          const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${latitude},${longitude}&radius=${radius}&type=${search.type}&key=${apiKey}`;
-          
-          // Add timeout for Google Places API
-          const controller = new AbortController();
-          const timeoutMs = 10000; // 10 second timeout
-          const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-          
-          console.log(`🔵 [GOOGLE PLACES] Attempt ${attempt}/${maxRetries} for ${search.type}`);
-          
-          const response = await fetch(url, { signal: controller.signal });
-          clearTimeout(timeoutId);
-          
-          if (response.ok) {
-            const data = await response.json();
-            
-            // Check for API errors in response
-            if (data.status && data.status !== 'OK') {
-              if (data.status === 'ZERO_RESULTS') {
-                console.log(`ℹ️ [GOOGLE PLACES] No results for ${search.type}`);
-                success = true;
-                break; // Move to next search type
-              } else if (data.status === 'OVER_QUERY_LIMIT') {
-                console.warn(`⚠️ [GOOGLE PLACES] Rate limit for ${search.type}, retrying...`);
-                lastError = new Error('Rate limit');
-                if (attempt < maxRetries) {
-                  await new Promise(resolve => setTimeout(resolve, 1000));
-                }
-                continue; // Retry
-              } else if (data.status === 'REQUEST_DENIED') {
-                console.warn(`⚠️ [GOOGLE PLACES] Request denied: ${data.error_message}`);
-                success = true;
-                break; // Don't retry - API key issue
-              } else {
-                console.warn(`⚠️ [GOOGLE PLACES] API error: ${data.status}`);
-                lastError = new Error(data.status);
-                if (attempt < maxRetries) {
-                  await new Promise(resolve => setTimeout(resolve, 500));
-                }
-                continue; // Retry
-              }
-            }
-            
-            if (data.results && Array.isArray(data.results)) {
-              console.log(`✅ [GOOGLE PLACES] Found ${data.results.length} results for ${search.type}`);
-              data.results.forEach((place: any) => {
-                if (place.geometry?.location) {
-                  const distance = calculateDistance(
-                    latitude, longitude,
-                    place.geometry.location.lat, place.geometry.location.lng
-                  );
-                  
-                  facilities.push({
-                    name: place.name || `${search.category} facility`,
-                    type: search.category as any,
-                    latitude: place.geometry.location.lat,
-                    longitude: place.geometry.location.lng,
-                    distance: Math.round(distance * 10) / 10,
-                    phone: place.formatted_phone_number || "N/A",
-                    address: place.vicinity || place.formatted_address || "N/A",
-                    isOpen24Hours: place.opening_hours?.open_now || search.category === 'hospital' || search.category === 'police',
-                    controlRoomNumber: (search.category === 'police' || search.category === 'hospital') ? place.formatted_phone_number : undefined,
-                    source: 'google'
-                  });
-                }
-              });
-            }
-            
-            success = true;
-            break; // Success, move to next search type
-          } else {
-            lastError = new Error(`HTTP ${response.status}`);
-            console.warn(`⚠️ [GOOGLE PLACES] HTTP ${response.status} on attempt ${attempt}`);
-            if (attempt < maxRetries) {
-              await new Promise(resolve => setTimeout(resolve, 500));
-            }
-          }
-        } catch (error: any) {
-          lastError = error;
-          if (error.name === 'AbortError') {
-            console.warn(`⏱️ [GOOGLE PLACES] Timeout on attempt ${attempt}`);
-          } else {
-            console.warn(`❌ [GOOGLE PLACES] Error on attempt ${attempt}:`, error.message);
-          }
-          
-          if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 500));
-          }
-        }
-      }
-      
-      if (!success && lastError) {
-        console.error(`❌ [GOOGLE PLACES] Failed for ${search.type}:`, lastError.message);
-      }
-      
-      // Small delay between searches
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  } catch (error) {
-    console.error("❌ [GOOGLE PLACES] Unexpected error:", error);
-  }
-  
-  console.log(`🟢 [GOOGLE PLACES] Found ${facilities.length} facilities total`);
   return facilities;
 }
 
