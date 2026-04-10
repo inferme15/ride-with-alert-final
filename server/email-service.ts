@@ -343,90 +343,85 @@ export class EmailService {
 
     const mapUrl = `https://www.google.com/maps?q=${emergency.latitude},${emergency.longitude}`;
     const emergencyType = String(emergency.emergencyType || 'other');
-    const emergencyTypeEmoji = {
-      accident: '🚨',
-      medical: '🏥',
-      breakdown: '🔧',
-      fire: '🔥',
-      other: '⚠️'
-    };
 
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-          .header { background: #dc2626; color: white; padding: 20px; text-align: center; }
-          .content { padding: 20px; }
-          .emergency-details { background: #fef2f2; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #dc2626; }
-          .location-map { text-align: center; margin: 20px 0; }
-          .btn-emergency { background: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; }
-          .facilities { background: #f0f9ff; padding: 15px; border-radius: 8px; margin: 15px 0; }
-          .facility-item { margin: 10px 0; padding: 10px; background: white; border-radius: 4px; }
-          .confirmed { background: #dc2626; color: white; padding: 10px; text-align: center; font-weight: bold; margin: 20px 0; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>${emergencyTypeEmoji[emergencyType as keyof typeof emergencyTypeEmoji] || emergencyTypeEmoji.other} CONFIRMED REAL EMERGENCY</h1>
-        </div>
-        <div class="content">
-          <div class="confirmed">
-            ⚠️ THIS IS A CONFIRMED REAL EMERGENCY - IMMEDIATE ACTION REQUIRED ⚠️
-          </div>
-          
-          <div class="emergency-details">
-            <h2>Emergency Details</h2>
-            <p><strong>Type:</strong> ${emergencyType.toUpperCase()}</p>
-            <p><strong>Driver:</strong> ${driver.name} (${driver.driverNumber})</p>
-            <p><strong>Phone:</strong> ${driver.phoneNumber}</p>
-            <p><strong>Vehicle:</strong> ${vehicle.vehicleNumber}</p>
-            <p><strong>Location:</strong> ${emergency.address || 'Location coordinates provided'}</p>
-            <p><strong>Time:</strong> ${new Date(emergency.timestamp).toLocaleString()}</p>
-            ${emergency.description ? `<p><strong>Description:</strong> ${emergency.description}</p>` : ''}
-          </div>
+    // Build plain text email
+    const textLines: string[] = [];
+    textLines.push('⚠️ ⚠️ ⚠️ CONFIRMED REAL EMERGENCY - IMMEDIATE ACTION REQUIRED ⚠️ ⚠️ ⚠️');
+    textLines.push('');
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('EMERGENCY DETAILS');
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('');
+    textLines.push(`Emergency Type: ${emergencyType.toUpperCase()}`);
+    textLines.push(`Driver Name: ${driver.name}`);
+    textLines.push(`Driver Number: ${driver.driverNumber}`);
+    textLines.push(`Driver Phone: ${driver.phoneNumber}`);
+    textLines.push(`Vehicle Number: ${vehicle.vehicleNumber}`);
+    textLines.push(`Vehicle Type: ${vehicle.vehicleType}`);
+    textLines.push(`Location: ${emergency.address || 'Location coordinates provided'}`);
+    textLines.push(`Coordinates: ${emergency.latitude}, ${emergency.longitude}`);
+    textLines.push(`Time: ${new Date(emergency.timestamp).toLocaleString()}`);
+    if (emergency.description) {
+      textLines.push(`Description: ${emergency.description}`);
+    }
+    textLines.push('');
+    
+    // Medical Information
+    if (driver.medicalConditions) {
+      textLines.push('═══════════════════════════════════════════════════════════════');
+      textLines.push('MEDICAL INFORMATION');
+      textLines.push('═══════════════════════════════════════════════════════════════');
+      textLines.push('');
+      textLines.push(`Medical Conditions: ${driver.medicalConditions}`);
+      textLines.push(`Blood Group: ${driver.bloodGroup || 'Not specified'}`);
+      textLines.push(`Emergency Contact: ${driver.emergencyContact}`);
+      textLines.push(`Emergency Contact Phone: ${driver.emergencyContactPhone}`);
+      textLines.push('');
+    }
 
-          <div class="location-map">
-            <h3>📍 Emergency Location</h3>
-            <p><strong>Coordinates:</strong> ${emergency.latitude}, ${emergency.longitude}</p>
-            <a href="${mapUrl}" class="btn-emergency" target="_blank">View Location on Map</a>
-          </div>
+    // Emergency Location
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('EMERGENCY LOCATION');
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('');
+    textLines.push(`Latitude: ${emergency.latitude}`);
+    textLines.push(`Longitude: ${emergency.longitude}`);
+    textLines.push(`Map Link: ${mapUrl}`);
+    textLines.push('');
 
-          ${driver.medicalConditions ? `
-          <div class="emergency-details">
-            <h3>🏥 Medical Information</h3>
-            <p><strong>Medical Conditions:</strong> ${driver.medicalConditions}</p>
-            <p><strong>Blood Group:</strong> ${driver.bloodGroup || 'Not specified'}</p>
-            <p><strong>Emergency Contact:</strong> ${driver.emergencyContact} - ${driver.emergencyContactPhone}</p>
-          </div>
-          ` : ''}
+    // Nearby Facilities
+    if (nearbyFacilities && nearbyFacilities.length > 0) {
+      textLines.push('═══════════════════════════════════════════════════════════════');
+      textLines.push('NEARBY EMERGENCY FACILITIES');
+      textLines.push('═══════════════════════════════════════════════════════════════');
+      textLines.push('');
+      nearbyFacilities.slice(0, 10).forEach((facility, index) => {
+        textLines.push(`${index + 1}. ${facility.name}`);
+        textLines.push(`   Type: ${facility.type.replace('_', ' ').toUpperCase()}`);
+        textLines.push(`   Address: ${facility.address}`);
+        textLines.push(`   Phone: ${EmailService.normalizeFacilityPhone(facility)}`);
+        textLines.push(`   Distance: ${facility.distance.toFixed(1)} km`);
+        textLines.push('');
+      });
+    }
 
-          <div class="facilities">
-            <h3>🏥 Nearby Emergency Facilities</h3>
-            ${nearbyFacilities.slice(0, 5).map(facility => `
-              <div class="facility-item">
-                <strong>${facility.name}</strong> (${facility.type.replace('_', ' ').toUpperCase()})<br>
-                📍 ${facility.address}<br>
-                📞 ${EmailService.normalizeFacilityPhone(facility)}<br>
-                📏 Distance: ${facility.distance.toFixed(1)} km
-              </div>
-            `).join('')}
-          </div>
+    // Immediate Actions
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('IMMEDIATE ACTIONS REQUIRED');
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('');
+    textLines.push('1. DISPATCH emergency services to location immediately');
+    textLines.push(`2. CONTACT driver at ${driver.phoneNumber}`);
+    textLines.push('3. COORDINATE with nearby facilities');
+    textLines.push('4. SEND rescue team to coordinates');
+    textLines.push('5. MONITOR situation and provide updates');
+    textLines.push('');
+    textLines.push('═══════════════════════════════════════════════════════════════');
+    textLines.push('');
+    textLines.push('This is an automated emergency alert from Ride With Alert System');
+    textLines.push('');
 
-          <div class="emergency-details">
-            <h3>⚡ Immediate Actions Required</h3>
-            <ul>
-              <li>Dispatch emergency services to location immediately</li>
-              <li>Contact driver at ${driver.phoneNumber}</li>
-              <li>Coordinate with nearby facilities</li>
-              <li>Send rescue team to coordinates</li>
-            </ul>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
+    const textContent = textLines.join('\n');
 
     // Send to configured emergency recipients only
     const testRecipients = process.env.EMERGENCY_EMAIL_RECIPIENTS?.split(',') || [FROM_EMAIL];
@@ -436,8 +431,8 @@ export class EmailService {
       await sendMail({
         to: recipient.trim(),
         subject: `🚨 CONFIRMED REAL EMERGENCY - ${emergencyType.toUpperCase()} - ${driver.name}`,
-        text: `EMERGENCY ALERT: ${emergencyType.toUpperCase()} - ${driver.name} at ${emergency.latitude}, ${emergency.longitude}`,
-        html: htmlContent,
+        text: textContent,
+        html: `<pre style="font-family: monospace; white-space: pre-wrap; word-wrap: break-word;">${textContent.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</pre>`,
       });
     }
   }
