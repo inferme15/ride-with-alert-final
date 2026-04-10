@@ -38,6 +38,10 @@ export default function DriverDashboard() {
   const [lastGpsUpdate, setLastGpsUpdate] = useState<number | null>(null);
   const [gpsConnectionStatus, setGpsConnectionStatus] = useState<'connecting' | 'connected' | 'weak' | 'lost'>('connecting');
   
+  // Facility update timing
+  const lastFacilityFetchRef = useRef<number>(0);
+  const FACILITY_FETCH_INTERVAL = 5000; // Fetch facilities every 5 seconds
+  
   // Real-time Analytics State
   const [currentRisk, setCurrentRisk] = useState<any>(null);
   const [vehicleHealth, setVehicleHealth] = useState<any>(null);
@@ -210,6 +214,17 @@ export default function DriverDashboard() {
   // Fetch current trip info with faster loading
   const { data: tripData, isLoading: tripLoading } = useCurrentTrip();
   const trip = tripData as EnhancedTrip | undefined;
+
+  // Fetch initial facilities when trip starts and location is available
+  useEffect(() => {
+    if (trip?.tripId && location) {
+      console.log(`🏥 [INITIAL FACILITIES] Fetching for trip ${trip.tripId} at ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`);
+      fetchNearbyFacilities(location.lat, location.lng).catch(err =>
+        console.error('❌ [INITIAL FACILITIES] Error:', err)
+      );
+      lastFacilityFetchRef.current = Date.now();
+    }
+  }, [trip?.tripId]);
   const getActiveVehicleLocation = () => {
     if (simulatedPosition && simulatedPosition.length === 2) {
       return { lat: simulatedPosition[0], lng: simulatedPosition[1] };
@@ -360,6 +375,17 @@ export default function DriverDashboard() {
         if (movedEnough || enoughTimeElapsed) {
           lastEmitAtRef.current = now;
           lastEmittedLocationRef.current = { lat: realLocation.lat, lng: realLocation.lng };
+          
+          // Fetch nearby facilities every 5 seconds (or when moved significantly)
+          const shouldFetchFacilities = now - lastFacilityFetchRef.current >= FACILITY_FETCH_INTERVAL;
+          if (shouldFetchFacilities) {
+            lastFacilityFetchRef.current = now;
+            console.log(`🏥 [FACILITIES] Fetching facilities at ${realLocation.lat.toFixed(4)}, ${realLocation.lng.toFixed(4)}`);
+            fetchNearbyFacilities(realLocation.lat, realLocation.lng).catch(err => 
+              console.error('❌ [FACILITIES] Error fetching:', err)
+            );
+          }
+          
           emit(events.LOCATION_UPDATE, {
           vehicleNumber: trip.vehicleNumber,
           location: realLocation,

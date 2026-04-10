@@ -44,50 +44,61 @@ export async function findNearbyFacilities(
   policePhone: string = "100",
   hospitalPhone: string = "108"
 ): Promise<NearbyFacility[]> {
-  console.log(`🔍 [VERY NEAR SEARCH] Starting strict nearby search for ${latitude}, ${longitude}`);
+  console.log(`\n🔴 [CRITICAL] Starting facility search for ${latitude}, ${longitude}`);
   
   let allFacilities: NearbyFacility[] = [];
   
-  // STRICT radius search - only very near facilities
-  const radiusSteps = [2000, 5000, 10000]; // 2km → 5km → 10km MAX
+  // AGGRESSIVE radius search - prioritize API results
+  const radiusSteps = [2000, 5000, 10000]; // 2km → 5km → 10km
   
   for (const radius of radiusSteps) {
-    console.log(`📍 [VERY NEAR SEARCH] Searching within ${radius/1000}km radius...`);
+    console.log(`\n🔴 [CRITICAL] Searching within ${radius/1000}km radius...`);
     
-    // 1. Try Google Places API first (if available)
-    const googleFacilities = await searchGooglePlaces(latitude, longitude, radius);
-    console.log(`🟢 [GOOGLE PLACES] Found ${googleFacilities.length} facilities within ${radius/1000}km`);
-    
-    // 2. Try OpenStreetMap API
+    // 1. PRIORITY: Try OpenStreetMap API FIRST (most reliable for India)
+    console.log(`🔴 [CRITICAL] Attempting OpenStreetMap API...`);
     const osmFacilities = await searchOpenStreetMap(latitude, longitude, radius, policePhone, hospitalPhone);
-    console.log(`🟠 [OPENSTREETMAP] Found ${osmFacilities.length} facilities within ${radius/1000}km`);
+    console.log(`🔴 [CRITICAL] OpenStreetMap returned ${osmFacilities.length} facilities`);
     
-    // 3. Search hardcoded database with STRICT distance filtering
+    // 2. SECONDARY: Try Google Places API
+    console.log(`🔴 [CRITICAL] Attempting Google Places API...`);
+    const googleFacilities = await searchGooglePlaces(latitude, longitude, radius);
+    console.log(`🔴 [CRITICAL] Google Places returned ${googleFacilities.length} facilities`);
+    
+    // 3. FALLBACK ONLY: Hardcoded database (0.1%)
+    console.log(`🔴 [CRITICAL] Getting hardcoded database as fallback...`);
     const hardcodedFacilities = searchHardcodedDatabase(latitude, longitude, radius/1000, policePhone, hospitalPhone);
-    console.log(`🔵 [HARDCODED DB] Found ${hardcodedFacilities.length} facilities within ${radius/1000}km`);
+    console.log(`🔴 [CRITICAL] Hardcoded DB returned ${hardcodedFacilities.length} facilities`);
     
-    // 4. Combine all sources and deduplicate
-    const combinedFacilities = combineAndDeduplicate([...googleFacilities, ...osmFacilities, ...hardcodedFacilities]);
-    console.log(`🔄 [COMBINED] Total ${combinedFacilities.length} unique facilities within ${radius/1000}km`);
+    // 4. Combine all sources - APIs first, then hardcoded
+    const combinedFacilities = combineAndDeduplicate([...osmFacilities, ...googleFacilities, ...hardcodedFacilities]);
+    console.log(`🔴 [CRITICAL] Combined total: ${combinedFacilities.length} unique facilities`);
     
     allFacilities = combinedFacilities;
     
-    // 5. Check if we have enough facilities per category
-    const categoryCounts = getCategoryCounts(allFacilities);
-    console.log(`📊 [CATEGORY COUNTS] Within ${radius/1000}km:`, categoryCounts);
+    // 5. Check if we have enough facilities from APIs
+    const apiOnlyFacilities = combinedFacilities.filter(f => f.source !== 'hardcoded');
+    console.log(`🔴 [CRITICAL] API facilities: ${apiOnlyFacilities.length}, Hardcoded: ${combinedFacilities.length - apiOnlyFacilities.length}`);
     
-    // If we have at least 1 facility in most categories, we can stop
-    const totalFacilities = Object.values(categoryCounts).reduce((sum, count) => sum + count, 0);
-    if (totalFacilities >= 8 || radius === 10000) { // Stop if we have 8+ facilities or reached max radius
-      console.log(`✅ [SEARCH COMPLETE] Found ${totalFacilities} facilities within ${radius/1000}km - stopping search`);
+    // If we have API results, stop searching
+    if (apiOnlyFacilities.length >= 3) {
+      console.log(`🔴 [CRITICAL] Got ${apiOnlyFacilities.length} API facilities - STOPPING SEARCH`);
+      break;
+    }
+    
+    // If we reached max radius, stop
+    if (radius === 10000) {
+      console.log(`🔴 [CRITICAL] Reached max radius - STOPPING SEARCH`);
       break;
     }
   }
   
-  // 6. Group by category and limit to max 3 per category, prioritize closest
+  // 6. Group by category and limit to max 3 per category
   const groupedFacilities = groupFacilitiesByCategory(allFacilities);
   
-  console.log(`🎯 [FINAL RESULT] Returning ${groupedFacilities.length} VERY NEAR facilities (max 3 per category)`);
+  console.log(`\n🔴 [CRITICAL] FINAL RESULT: ${groupedFacilities.length} facilities`);
+  console.log(`🔴 [CRITICAL] API sources: ${groupedFacilities.filter(f => f.source !== 'hardcoded').length}`);
+  console.log(`🔴 [CRITICAL] Hardcoded fallback: ${groupedFacilities.filter(f => f.source === 'hardcoded').length}`);
+  
   return groupedFacilities;
 }
 
@@ -214,11 +225,12 @@ async function searchGooglePlaces(
     { type: 'car_repair', category: 'service_center' }
   ];
   
-  const maxRetries = 2;
+  const maxRetries = 3;
   
   try {
     for (const search of searchTypes) {
       let lastError: any;
+      let success = false;
       
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
@@ -226,8 +238,10 @@ async function searchGooglePlaces(
           
           // Add timeout for Google Places API
           const controller = new AbortController();
-          const timeoutMs = attempt === 1 ? 5000 : 8000; // 5s first attempt, 8s for retry
+          const timeoutMs = 10000; // 10 second timeout
           const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+          
+          console.log(`🔵 [GOOGLE PLACES] Attempt ${attempt}/${maxRetries} for ${search.type}`);
           
           const response = await fetch(url, { signal: controller.signal });
           clearTimeout(timeoutId);
@@ -239,19 +253,31 @@ async function searchGooglePlaces(
             if (data.status && data.status !== 'OK') {
               if (data.status === 'ZERO_RESULTS') {
                 console.log(`ℹ️ [GOOGLE PLACES] No results for ${search.type}`);
+                success = true;
                 break; // Move to next search type
               } else if (data.status === 'OVER_QUERY_LIMIT') {
-                console.warn(`⚠️ [GOOGLE PLACES] Rate limit exceeded for ${search.type}`);
-                lastError = new Error('Rate limit exceeded');
+                console.warn(`⚠️ [GOOGLE PLACES] Rate limit for ${search.type}, retrying...`);
+                lastError = new Error('Rate limit');
+                if (attempt < maxRetries) {
+                  await new Promise(resolve => setTimeout(resolve, 1000));
+                }
                 continue; // Retry
+              } else if (data.status === 'REQUEST_DENIED') {
+                console.warn(`⚠️ [GOOGLE PLACES] Request denied: ${data.error_message}`);
+                success = true;
+                break; // Don't retry - API key issue
               } else {
-                console.warn(`⚠️ [GOOGLE PLACES] API error for ${search.type}: ${data.status}`);
+                console.warn(`⚠️ [GOOGLE PLACES] API error: ${data.status}`);
                 lastError = new Error(data.status);
+                if (attempt < maxRetries) {
+                  await new Promise(resolve => setTimeout(resolve, 500));
+                }
                 continue; // Retry
               }
             }
             
-            if (data.results) {
+            if (data.results && Array.isArray(data.results)) {
+              console.log(`✅ [GOOGLE PLACES] Found ${data.results.length} results for ${search.type}`);
               data.results.forEach((place: any) => {
                 if (place.geometry?.location) {
                   const distance = calculateDistance(
@@ -275,34 +301,41 @@ async function searchGooglePlaces(
               });
             }
             
+            success = true;
             break; // Success, move to next search type
           } else {
-            lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
-            console.warn(`⚠️ [GOOGLE PLACES] HTTP error on attempt ${attempt} for ${search.type}:`, lastError);
+            lastError = new Error(`HTTP ${response.status}`);
+            console.warn(`⚠️ [GOOGLE PLACES] HTTP ${response.status} on attempt ${attempt}`);
+            if (attempt < maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
           }
         } catch (error: any) {
           lastError = error;
           if (error.name === 'AbortError') {
-            console.warn(`⏱️ [GOOGLE PLACES] Timeout on attempt ${attempt} for ${search.type}`);
+            console.warn(`⏱️ [GOOGLE PLACES] Timeout on attempt ${attempt}`);
           } else {
-            console.warn(`❌ [GOOGLE PLACES] Error on attempt ${attempt} for ${search.type}:`, error.message);
+            console.warn(`❌ [GOOGLE PLACES] Error on attempt ${attempt}:`, error.message);
           }
           
-          // If not the last attempt, wait before retrying
           if (attempt < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
       }
       
-      // Small delay to respect API rate limits
+      if (!success && lastError) {
+        console.error(`❌ [GOOGLE PLACES] Failed for ${search.type}:`, lastError.message);
+      }
+      
+      // Small delay between searches
       await new Promise(resolve => setTimeout(resolve, 100));
     }
   } catch (error) {
     console.error("❌ [GOOGLE PLACES] Unexpected error:", error);
   }
   
-  console.log(`🟢 [GOOGLE PLACES] Found ${facilities.length} facilities`);
+  console.log(`🟢 [GOOGLE PLACES] Found ${facilities.length} facilities total`);
   return facilities;
 }
 
@@ -317,16 +350,16 @@ async function searchOpenStreetMap(
   hospitalPhone: string
 ): Promise<NearbyFacility[]> {
   const facilities: NearbyFacility[] = [];
-  const maxRetries = 2;
+  const maxRetries = 3;
   let lastError: any;
   
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔄 [OPENSTREETMAP] Attempt ${attempt}/${maxRetries} to fetch facilities`);
+      console.log(`🔴 [OPENSTREETMAP] Attempt ${attempt}/${maxRetries} - CRITICAL API CALL`);
       
-      // OpenStreetMap Overpass API query with timeout
+      // OpenStreetMap Overpass API query - AGGRESSIVE search
       const overpassQuery = `
-        [out:json][timeout:10];
+        [out:json][timeout:25];
         (
           node["amenity"="hospital"](around:${radius},${latitude},${longitude});
           node["amenity"="clinic"](around:${radius},${latitude},${longitude});
@@ -335,15 +368,20 @@ async function searchOpenStreetMap(
           node["amenity"="fire_station"](around:${radius},${latitude},${longitude});
           node["amenity"="fuel"](around:${radius},${latitude},${longitude});
           node["shop"="car_repair"](around:${radius},${latitude},${longitude});
+          way["amenity"="hospital"](around:${radius},${latitude},${longitude});
+          way["amenity"="clinic"](around:${radius},${latitude},${longitude});
+          way["amenity"="police"](around:${radius},${latitude},${longitude});
         );
         out center;
       `;
 
-      // Add timeout and abort controller - increase timeout for retries
+      // AGGRESSIVE timeout - give it time to work
       const controller = new AbortController();
-      const timeoutMs = attempt === 1 ? 15000 : 25000; // 15s first attempt, 25s for retry
+      const timeoutMs = 30000; // 30 seconds - give API time to respond
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
+      console.log(`🔴 [OPENSTREETMAP] Sending request with ${timeoutMs}ms timeout...`);
+      
       const response = await fetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -355,86 +393,97 @@ async function searchOpenStreetMap(
 
       if (response.ok) {
         const data = await response.json();
-        console.log(`✅ [OPENSTREETMAP] Successfully fetched data on attempt ${attempt}`);
+        console.log(`✅ [OPENSTREETMAP] SUCCESS! Got ${data.elements?.length || 0} elements`);
         
-        data.elements?.forEach((element: any) => {
-          const facilityLat = element.lat || element.center?.lat;
-          const facilityLon = element.lon || element.center?.lon;
-          
-          if (!facilityLat || !facilityLon) return;
+        if (data.elements && Array.isArray(data.elements)) {
+          data.elements.forEach((element: any) => {
+            const facilityLat = element.lat || element.center?.lat;
+            const facilityLon = element.lon || element.center?.lon;
+            
+            if (!facilityLat || !facilityLon) return;
 
-          const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
-          
-          let type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "fire_station" = "service_center";
-          let phone = "N/A";
-          
-          // Map OSM amenities to our categories
-          if (element.tags?.amenity === "hospital") {
-            type = "hospital";
-            phone = element.tags?.phone || hospitalPhone;
-          } else if (element.tags?.amenity === "clinic") {
-            type = "hospital";
-            phone = element.tags?.phone || hospitalPhone;
-          } else if (element.tags?.amenity === "pharmacy") {
-            type = "pharmacy";
-            phone = element.tags?.phone || "1800-102-1088";
-          } else if (element.tags?.amenity === "police") {
-            type = "police";
-            phone = element.tags?.phone || policePhone;
-          } else if (element.tags?.amenity === "fire_station") {
-            type = "fire_station";
-            phone = element.tags?.phone || "101";
-          } else if (element.tags?.amenity === "fuel") {
-            type = "fuel_station";
-            phone = element.tags?.phone || "1800-2333-555";
-          } else if (element.tags?.shop === "car_repair") {
-            type = "service_center";
-            phone = element.tags?.phone || "N/A";
-          }
+            const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
+            
+            let type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "fire_station" = "service_center";
+            let phone = "N/A";
+            
+            // Map OSM amenities to our categories
+            if (element.tags?.amenity === "hospital") {
+              type = "hospital";
+              phone = element.tags?.phone || hospitalPhone;
+            } else if (element.tags?.amenity === "clinic") {
+              type = "hospital";
+              phone = element.tags?.phone || hospitalPhone;
+            } else if (element.tags?.amenity === "pharmacy") {
+              type = "pharmacy";
+              phone = element.tags?.phone || "1800-102-1088";
+            } else if (element.tags?.amenity === "police") {
+              type = "police";
+              phone = element.tags?.phone || policePhone;
+            } else if (element.tags?.amenity === "fire_station") {
+              type = "fire_station";
+              phone = element.tags?.phone || "101";
+            } else if (element.tags?.amenity === "fuel") {
+              type = "fuel_station";
+              phone = element.tags?.phone || "1800-2333-555";
+            } else if (element.tags?.shop === "car_repair") {
+              type = "service_center";
+              phone = element.tags?.phone || "N/A";
+            }
 
-          const name = element.tags?.name || `${type.replace('_', ' ')} (${distance.toFixed(1)}km)`;
-          const address = [
-            element.tags?.["addr:street"],
-            element.tags?.["addr:city"],
-            element.tags?.["addr:state"]
-          ].filter(Boolean).join(", ") || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`;
+            const name = element.tags?.name || `${type.replace('_', ' ')} (${distance.toFixed(1)}km)`;
+            const address = [
+              element.tags?.["addr:street"],
+              element.tags?.["addr:city"],
+              element.tags?.["addr:state"]
+            ].filter(Boolean).join(", ") || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`;
 
-          facilities.push({
-            name,
-            type,
-            latitude: facilityLat,
-            longitude: facilityLon,
-            distance: Math.round(distance * 10) / 10,
-            phone,
-            address,
-            isOpen24Hours: element.tags?.["opening_hours"] === "24/7" || type === "hospital" || type === "police",
-            controlRoomNumber: (type === "police" || type === "hospital") ? phone : undefined,
-            source: 'osm'
+            facilities.push({
+              name,
+              type,
+              latitude: facilityLat,
+              longitude: facilityLon,
+              distance: Math.round(distance * 10) / 10,
+              phone,
+              address,
+              isOpen24Hours: element.tags?.["opening_hours"] === "24/7" || type === "hospital" || type === "police",
+              controlRoomNumber: (type === "police" || type === "hospital") ? phone : undefined,
+              source: 'osm'
+            });
           });
-        });
+        }
         
-        return facilities; // Success, return immediately
+        console.log(`✅ [OPENSTREETMAP] Parsed ${facilities.length} facilities - RETURNING SUCCESS`);
+        return facilities; // Return immediately on success
+      } else if (response.status === 429) {
+        lastError = new Error(`Rate limited (HTTP 429)`);
+        console.warn(`⚠️ [OPENSTREETMAP] Rate limited, waiting 2s before retry...`);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       } else {
         lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
-        console.warn(`⚠️ [OPENSTREETMAP] HTTP error on attempt ${attempt}:`, lastError);
+        console.warn(`⚠️ [OPENSTREETMAP] HTTP error ${response.status}, retrying...`);
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
     } catch (error: any) {
       lastError = error;
       if (error.name === 'AbortError') {
-        console.warn(`⏱️ [OPENSTREETMAP] Timeout on attempt ${attempt} (${attempt === 1 ? '8s' : '12s'})`);
+        console.warn(`⏱️ [OPENSTREETMAP] Timeout on attempt ${attempt} - retrying...`);
       } else {
         console.warn(`❌ [OPENSTREETMAP] Error on attempt ${attempt}:`, error.message);
       }
       
-      // If not the last attempt, wait before retrying
       if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay before retry
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
   }
   
-  console.error(`❌ [OPENSTREETMAP] Failed after ${maxRetries} attempts:`, lastError?.message);
-  return facilities; // Return empty array if all retries failed
+  console.error(`❌ [OPENSTREETMAP] FAILED after ${maxRetries} attempts:`, lastError?.message);
+  return facilities; // Return empty - will use other sources
 }
 
 /**
