@@ -202,140 +202,100 @@ async function searchOpenStreetMap(
   hospitalPhone: string
 ): Promise<NearbyFacility[]> {
   const facilities: NearbyFacility[] = [];
-  const maxRetries = 3;
+  const maxRetries = 2;
   let lastError: any;
   
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      console.log(`🔴 [OPENSTREETMAP] Attempt ${attempt}/${maxRetries} - CRITICAL API CALL`);
-      
-      // OpenStreetMap Overpass API query - AGGRESSIVE search
-      const overpassQuery = `
-        [out:json][timeout:25];
-        (
-          node["amenity"="hospital"](around:${radius},${latitude},${longitude});
-          node["amenity"="clinic"](around:${radius},${latitude},${longitude});
-          node["amenity"="pharmacy"](around:${radius},${latitude},${longitude});
-          node["amenity"="police"](around:${radius},${latitude},${longitude});
-          node["amenity"="fire_station"](around:${radius},${latitude},${longitude});
-          node["amenity"="fuel"](around:${radius},${latitude},${longitude});
-          node["shop"="car_repair"](around:${radius},${latitude},${longitude});
-          way["amenity"="hospital"](around:${radius},${latitude},${longitude});
-          way["amenity"="clinic"](around:${radius},${latitude},${longitude});
-          way["amenity"="police"](around:${radius},${latitude},${longitude});
-        );
-        out center;
-      `;
+  // Search for different facility types using Nominatim
+  const searchQueries = [
+    { query: 'hospital', type: 'hospital' as const, phone: hospitalPhone },
+    { query: 'clinic', type: 'hospital' as const, phone: hospitalPhone },
+    { query: 'pharmacy', type: 'pharmacy' as const, phone: '1800-102-1088' },
+    { query: 'police station', type: 'police' as const, phone: policePhone },
+    { query: 'fire station', type: 'fire_station' as const, phone: '101' },
+    { query: 'petrol pump', type: 'fuel_station' as const, phone: '1800-2333-555' },
+    { query: 'fuel station', type: 'fuel_station' as const, phone: '1800-2333-555' },
+    { query: 'car repair', type: 'service_center' as const, phone: 'N/A' },
+    { query: 'mechanic', type: 'service_center' as const, phone: 'N/A' }
+  ];
 
-      // AGGRESSIVE timeout - give it time to work
-      const controller = new AbortController();
-      const timeoutMs = 30000; // 30 seconds - give API time to respond
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-      console.log(`🔴 [OPENSTREETMAP] Sending request with ${timeoutMs}ms timeout...`);
-      
-      const response = await fetch('https://overpass.kumi.systems/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(overpassQuery)}`,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log(`✅ [OPENSTREETMAP] SUCCESS! Got ${data.elements?.length || 0} elements`);
+  for (const searchItem of searchQueries) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`🔴 [NOMINATIM] Searching for "${searchItem.query}" near ${latitude}, ${longitude} (attempt ${attempt}/${maxRetries})`);
         
-        if (data.elements && Array.isArray(data.elements)) {
-          data.elements.forEach((element: any) => {
-            const facilityLat = element.lat || element.center?.lat;
-            const facilityLon = element.lon || element.center?.lon;
-            
-            if (!facilityLat || !facilityLon) return;
+        // Use Nominatim to search for facilities
+        const radiusKm = radius / 1000;
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchItem.query)}&format=json&limit=10&viewbox=${longitude - radiusKm/111},${latitude - radiusKm/111},${longitude + radiusKm/111},${latitude + radiusKm/111}&bounded=1`;
+        
+        const controller = new AbortController();
+        const timeoutMs = 10000; // 10 seconds
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-            const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
-            
-            let type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "fire_station" = "service_center";
-            let phone = "N/A";
-            
-            // Map OSM amenities to our categories
-            if (element.tags?.amenity === "hospital") {
-              type = "hospital";
-              phone = element.tags?.phone || hospitalPhone;
-            } else if (element.tags?.amenity === "clinic") {
-              type = "hospital";
-              phone = element.tags?.phone || hospitalPhone;
-            } else if (element.tags?.amenity === "pharmacy") {
-              type = "pharmacy";
-              phone = element.tags?.phone || "1800-102-1088";
-            } else if (element.tags?.amenity === "police") {
-              type = "police";
-              phone = element.tags?.phone || policePhone;
-            } else if (element.tags?.amenity === "fire_station") {
-              type = "fire_station";
-              phone = element.tags?.phone || "101";
-            } else if (element.tags?.amenity === "fuel") {
-              type = "fuel_station";
-              phone = element.tags?.phone || "1800-2333-555";
-            } else if (element.tags?.shop === "car_repair") {
-              type = "service_center";
-              phone = element.tags?.phone || "N/A";
-            }
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { 'User-Agent': 'RideWithAlert/1.0' }
+        });
 
-            const name = element.tags?.name || `${type.replace('_', ' ')} (${distance.toFixed(1)}km)`;
-            const address = [
-              element.tags?.["addr:street"],
-              element.tags?.["addr:city"],
-              element.tags?.["addr:state"]
-            ].filter(Boolean).join(", ") || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`;
+        clearTimeout(timeoutId);
 
-            facilities.push({
-              name,
-              type,
-              latitude: facilityLat,
-              longitude: facilityLon,
-              distance: Math.round(distance * 10) / 10,
-              phone,
-              address,
-              isOpen24Hours: element.tags?.["opening_hours"] === "24/7" || type === "hospital" || type === "police",
-              controlRoomNumber: (type === "police" || type === "hospital") ? phone : undefined,
-              source: 'osm'
+        if (response.ok) {
+          const data = await response.json();
+          console.log(`✅ [NOMINATIM] Found ${data.length} results for "${searchItem.query}"`);
+          
+          if (Array.isArray(data)) {
+            data.forEach((place: any) => {
+              if (place.lat && place.lon) {
+                const facilityLat = parseFloat(place.lat);
+                const facilityLon = parseFloat(place.lon);
+                const distance = calculateDistance(latitude, longitude, facilityLat, facilityLon);
+                
+                // Only include if within radius
+                if (distance <= radius / 1000) {
+                  facilities.push({
+                    name: place.name || place.display_name || `${searchItem.type.replace('_', ' ')}`,
+                    type: searchItem.type,
+                    latitude: facilityLat,
+                    longitude: facilityLon,
+                    distance: Math.round(distance * 10) / 10,
+                    phone: searchItem.phone,
+                    address: place.display_name || `${facilityLat.toFixed(4)}, ${facilityLon.toFixed(4)}`,
+                    isOpen24Hours: searchItem.type === 'hospital' || searchItem.type === 'police' || searchItem.type === 'fire_station',
+                    controlRoomNumber: (searchItem.type === 'police' || searchItem.type === 'hospital') ? searchItem.phone : undefined,
+                    source: 'nominatim'
+                  });
+                }
+              }
             });
-          });
+          }
+          
+          break; // Success, move to next search query
+        } else {
+          lastError = new Error(`HTTP ${response.status}`);
+          console.warn(`⚠️ [NOMINATIM] HTTP ${response.status} on attempt ${attempt}`);
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+        }
+      } catch (error: any) {
+        lastError = error;
+        if (error.name === 'AbortError') {
+          console.warn(`⏱️ [NOMINATIM] Timeout on attempt ${attempt}`);
+        } else {
+          console.warn(`❌ [NOMINATIM] Error on attempt ${attempt}:`, error.message);
         }
         
-        console.log(`✅ [OPENSTREETMAP] Parsed ${facilities.length} facilities - RETURNING SUCCESS`);
-        return facilities; // Return immediately on success
-      } else if (response.status === 429) {
-        lastError = new Error(`Rate limited (HTTP 429)`);
-        console.warn(`⚠️ [OPENSTREETMAP] Rate limited, waiting 2s before retry...`);
         if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
-      } else {
-        lastError = new Error(`HTTP ${response.status}: ${response.statusText}`);
-        console.warn(`⚠️ [OPENSTREETMAP] HTTP error ${response.status}, retrying...`);
-        if (attempt < maxRetries) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-      }
-    } catch (error: any) {
-      lastError = error;
-      if (error.name === 'AbortError') {
-        console.warn(`⏱️ [OPENSTREETMAP] Timeout on attempt ${attempt} - retrying...`);
-      } else {
-        console.warn(`❌ [OPENSTREETMAP] Error on attempt ${attempt}:`, error.message);
-      }
-      
-      if (attempt < maxRetries) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
+    
+    // Small delay between searches to respect API rate limits
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
   
-  console.error(`❌ [OPENSTREETMAP] FAILED after ${maxRetries} attempts:`, lastError?.message);
-  return facilities; // Return empty - will use other sources
+  console.log(`✅ [NOMINATIM] Found ${facilities.length} total facilities`);
+  return facilities;
 }
 
 /**
