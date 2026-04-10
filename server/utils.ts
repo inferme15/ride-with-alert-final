@@ -233,7 +233,10 @@ async function searchOpenStreetMap(
 
         const response = await fetch(url, {
           signal: controller.signal,
-          headers: { 'User-Agent': 'RideWithAlert/1.0' }
+          headers: { 
+            'User-Agent': 'RideWithAlert/1.0 (Emergency Response System)',
+            'Accept': 'application/json'
+          }
         });
 
         clearTimeout(timeoutId);
@@ -269,6 +272,12 @@ async function searchOpenStreetMap(
           }
           
           break; // Success, move to next search query
+        } else if (response.status === 429) {
+          lastError = new Error(`Rate limited (HTTP 429)`);
+          console.warn(`⚠️ [NOMINATIM] Rate limited on attempt ${attempt}, waiting 2s...`);
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+          }
         } else {
           lastError = new Error(`HTTP ${response.status}`);
           console.warn(`⚠️ [NOMINATIM] HTTP ${response.status} on attempt ${attempt}`);
@@ -290,8 +299,9 @@ async function searchOpenStreetMap(
       }
     }
     
-    // Small delay between searches to respect API rate limits
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Respectful delay between searches to avoid rate limiting
+    // Nominatim's policy: max 1 request per second per IP
+    await new Promise(resolve => setTimeout(resolve, 1100));
   }
   
   console.log(`✅ [NOMINATIM] Found ${facilities.length} total facilities`);
