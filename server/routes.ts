@@ -7,7 +7,8 @@ import fs from "fs";
 import { storage } from "./storage";
 import { api, socketEvents } from "@shared/routes";
 import { insertVehicleSchema, insertDriverSchema } from "@shared/schema";
-import { generateTemporaryCredentials, findNearbyFacilities, getLocationName, isLocationInIndia } from "./utils";
+import { generateTemporaryCredentials, getLocationName, isLocationInIndia } from "./utils";
+import { getCachedNearbyFacilities, getEmergencyFacilities, preloadFacilities, getCacheStats } from "./facility-cache";
 import { EmailService } from "./email-service";
 import { z } from "zod";
 
@@ -511,6 +512,21 @@ This message is for testing purposes only. Please do not panic.`;
         ...fullTrip,
         routeAnalysis,
         selectedRoute: selectedRoute || null
+      });
+
+      // Preload facilities in background when trip starts
+      setImmediate(async () => {
+        try {
+          if (fullTrip.startLatitude && fullTrip.startLongitude) {
+            console.log(`🚀 [PRELOAD] Background loading facilities for trip ${fullTrip.tripId}`);
+            await preloadFacilities(
+              parseFloat(fullTrip.startLatitude), 
+              parseFloat(fullTrip.startLongitude)
+            );
+          }
+        } catch (error) {
+          console.warn('⚠️ [PRELOAD] Failed to preload facilities:', error);
+        }
       });
 
       console.log('✅ Trip assigned successfully:', {
@@ -1241,9 +1257,9 @@ This message is for testing purposes only. Please do not panic.`;
       // Do slow operations in background (don't block response)
       setImmediate(async () => {
         try {
-          // Find nearby facilities
-          const allFacilities = await findNearbyFacilities(latitude, longitude);
-          console.log(`[NEARBY FACILITIES] Found ${allFacilities.length} facilities`);
+          // Find nearby facilities using optimized cache
+          const allFacilities = await getEmergencyFacilities(latitude, longitude);
+          console.log(`[EMERGENCY FACILITIES] Found ${allFacilities.length} facilities`);
           
           // Get location name
           let locationName = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
@@ -1296,10 +1312,21 @@ This message is for testing purposes only. Please do not panic.`;
         return res.status(400).json({ message: "Valid latitude and longitude required" });
       }
 
-      const facilities = await findNearbyFacilities(latitude, longitude);
-      res.json(facilities);
+      const facilities = await getCachedNearbyFacilities(latitude, longitude);
+      res.json(facilities.facilities);
     } catch (err) {
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // Cache status endpoint for monitoring
+  app.get("/api/cache/stats", (req, res) => {
+    try {
+      const stats = getCacheStats();
+      res.json(stats);
+    } catch (err) {
+      console.error("Error getting cache stats:", err);
+      res.status(500).json({ message: "Failed to get cache stats" });
     }
   });
 
@@ -1371,8 +1398,8 @@ This message is for testing purposes only. Please do not panic.`;
       const latitude = parseFloat(String(fullEmergency.latitude));
       const longitude = parseFloat(String(fullEmergency.longitude));
 
-      // Get nearby facilities
-      const allFacilities = await findNearbyFacilities(latitude, longitude);
+      // Get nearby facilities using optimized cache
+      const allFacilities = await getEmergencyFacilities(latitude, longitude);
 
       // Send emails to police and hospitals for REAL emergency
       try {
@@ -1465,9 +1492,9 @@ This message is for testing purposes only. Please do not panic.`;
         console.error('❌ Error stopping trip:', tripError);
       }
 
-      // 2. FETCH NEARBY FACILITIES for emergency email
+      // 2. FETCH NEARBY FACILITIES for emergency email using optimized cache
       console.log(`[FETCHING FACILITIES] For emergency at ${latitude}, ${longitude}`);
-      let nearbyFacilities = await findNearbyFacilities(latitude, longitude);
+      let nearbyFacilities = await getEmergencyFacilities(latitude, longitude);
       if ((!nearbyFacilities || nearbyFacilities.length === 0) && Array.isArray(facilitiesFromManager) && facilitiesFromManager.length > 0) {
         nearbyFacilities = facilitiesFromManager;
         console.log(`[FACILITIES FALLBACK] Using ${nearbyFacilities.length} facilities from manager popup payload`);
