@@ -11,16 +11,26 @@ const FROM_EMAIL = process.env.SENDER_EMAIL?.trim() || 'kitika1508@gmail.com';
 let transporter: nodemailer.Transporter | null = null;
 
 if (AWS_SES_USER && AWS_SES_PASSWORD) {
-  transporter = nodemailer.createTransport({
+  // Enhanced configuration for Render deployment
+  const smtpConfig = {
     host: `email-smtp.${AWS_SES_REGION}.amazonaws.com`,
-    port: 587,
-    secure: false,
+    port: 465, // Use port 465 (SSL) for better Render compatibility
+    secure: true, // true for 465, false for other ports
     auth: {
       user: AWS_SES_USER,
       pass: AWS_SES_PASSWORD,
     },
-  });
+    connectionTimeout: 30000, // 30 seconds for Render
+    greetingTimeout: 15000,   // 15 seconds  
+    socketTimeout: 30000,     // 30 seconds
+    pool: false,              // Disable pooling for Render
+    debug: process.env.NODE_ENV !== 'production', // Enable debug in development
+    logger: process.env.NODE_ENV !== 'production', // Enable logging in development
+  };
+  
+  transporter = nodemailer.createTransport(smtpConfig);
   console.log('✅ AWS SES email service initialized');
+  console.log(`📧 Region: ${AWS_SES_REGION}, Port: ${smtpConfig.port}, Secure: ${smtpConfig.secure}, Sender: ${FROM_EMAIL}`);
 } else {
   console.warn('⚠️ AWS_SES_USER or AWS_SES_PASSWORD not set - email notifications will be skipped');
 }
@@ -37,6 +47,7 @@ async function sendMail(msg: {
     return;
   }
   try {
+    console.log(`📧 Attempting to send email to ${msg.to}...`);
     const response = await transporter.sendMail({
       from: FROM_EMAIL,
       to: msg.to,
@@ -47,6 +58,24 @@ async function sendMail(msg: {
     console.log(`✅ Email sent to ${msg.to} | messageId: ${response.messageId}`);
   } catch (err: any) {
     console.error('❌ AWS SES error:', err?.message || err);
+    console.error('❌ Error details:', {
+      code: err?.code,
+      command: err?.command,
+      response: err?.response,
+      responseCode: err?.responseCode
+    });
+    
+    // Log specific timeout errors
+    if (err?.message?.includes('timeout') || err?.code === 'ETIMEDOUT') {
+      console.error('⏰ Connection timeout - check AWS SES region and network connectivity');
+    }
+    if (err?.message?.includes('authentication') || err?.responseCode === 535) {
+      console.error('🔐 Authentication failed - check AWS SES credentials');
+    }
+    if (err?.message?.includes('verification') || err?.responseCode === 554) {
+      console.error('📧 Email not verified - verify sender email in AWS SES console');
+    }
+    
     throw err;
   }
 }
