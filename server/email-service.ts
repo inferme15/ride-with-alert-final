@@ -1,79 +1,94 @@
-import nodemailer from 'nodemailer';
+import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import type { Driver, Emergency, Trip, Vehicle } from '../shared/schema';
 import { extractCitiesAlongRoute, generateRouteMapUrl } from './route-cities';
 
-// Initialize AWS SES with SMTP credentials
-const AWS_SES_USER = process.env.AWS_SES_USER;
-const AWS_SES_PASSWORD = process.env.AWS_SES_PASSWORD;
+// Initialize AWS SES with API credentials (more reliable than SMTP for Render)
+const AWS_ACCESS_KEY_ID = process.env.AWS_ACCESS_KEY_ID;
+const AWS_SECRET_ACCESS_KEY = process.env.AWS_SECRET_ACCESS_KEY;
 const AWS_SES_REGION = process.env.AWS_SES_REGION || 'ap-south-1';
 const FROM_EMAIL = process.env.SENDER_EMAIL?.trim() || 'kitika1508@gmail.com';
 
-let transporter: nodemailer.Transporter | null = null;
+let sesClient: SESClient | null = null;
+let emailProvider = 'none';
 
-if (AWS_SES_USER && AWS_SES_PASSWORD) {
-  // Enhanced configuration for Render deployment
-  const smtpConfig = {
-    host: `email-smtp.${AWS_SES_REGION}.amazonaws.com`,
-    port: 465, // Use port 465 (SSL) for better Render compatibility
-    secure: true, // true for 465, false for other ports
-    auth: {
-      user: AWS_SES_USER,
-      pass: AWS_SES_PASSWORD,
-    },
-    connectionTimeout: 30000, // 30 seconds for Render
-    greetingTimeout: 15000,   // 15 seconds  
-    socketTimeout: 30000,     // 30 seconds
-    pool: false,              // Disable pooling for Render
-    debug: process.env.NODE_ENV !== 'production', // Enable debug in development
-    logger: process.env.NODE_ENV !== 'production', // Enable logging in development
-  };
-  
-  transporter = nodemailer.createTransport(smtpConfig);
-  console.log('✅ AWS SES email service initialized');
-  console.log(`📧 Region: ${AWS_SES_REGION}, Port: ${smtpConfig.port}, Secure: ${smtpConfig.secure}, Sender: ${FROM_EMAIL}`);
+// Initialize AWS SES API client
+if (AWS_ACCESS_KEY_ID && AWS_SECRET_ACCESS_KEY) {
+  try {
+    sesClient = new SESClient({
+      region: AWS_SES_REGION,
+      credentials: {
+        accessKeyId: AWS_ACCESS_KEY_ID,
+        secretAccessKey: AWS_SECRET_ACCESS_KEY,
+      },
+    });
+    emailProvider = 'aws-ses-api';
+    console.log('✅ AWS SES API service initialized');
+    console.log(`📧 Provider: AWS SES API, Region: ${AWS_SES_REGION}, Sender: ${FROM_EMAIL}`);
+  } catch (error) {
+    console.error('❌ AWS SES API setup failed:', error);
+    sesClient = null;
+  }
 } else {
-  console.warn('⚠️ AWS_SES_USER or AWS_SES_PASSWORD not set - email notifications will be skipped');
+  console.warn('⚠️ AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY not set - email notifications will be skipped');
 }
 
-// Helper: send via AWS SES, swallow errors so they never crash the app
+// Helper: send via AWS SES API
 async function sendMail(msg: {
   to: string;
   subject: string;
   text: string;
   html: string;
 }) {
-  if (!transporter || !FROM_EMAIL) {
-    console.log('📧 Email skipped - AWS SES not configured');
+  if (!sesClient) {
+    console.log('📧 Email skipped - AWS SES API not configured');
     return;
   }
+
+  console.log(`📧 Attempting to send email to ${msg.to} using ${emailProvider}...`);
+
   try {
-    console.log(`📧 Attempting to send email to ${msg.to}...`);
-    const response = await transporter.sendMail({
-      from: FROM_EMAIL,
-      to: msg.to,
-      subject: msg.subject,
-      text: msg.text,
-      html: msg.html,
+    const command = new SendEmailCommand({
+      Source: FROM_EMAIL,
+      Destination: {
+        ToAddresses: [msg.to],
+      },
+      Message: {
+        Subject: {
+          Data: msg.subject,
+          Charset: 'UTF-8',
+        },
+        Body: {
+          Text: {
+            Data: msg.text,
+            Charset: 'UTF-8',
+          },
+          Html: {
+            Data: msg.html,
+            Charset: 'UTF-8',
+          },
+        },
+      },
     });
-    console.log(`✅ Email sent to ${msg.to} | messageId: ${response.messageId}`);
+
+    const response = await sesClient.send(command);
+    console.log(`✅ Email sent via AWS SES API to ${msg.to} | messageId: ${response.MessageId}`);
   } catch (err: any) {
-    console.error('❌ AWS SES error:', err?.message || err);
-    console.error('❌ Error details:', {
-      code: err?.code,
-      command: err?.command,
-      response: err?.response,
-      responseCode: err?.responseCode
+    console.error('❌ AWS SES API error:', err?.message || err);
+    console.error('❌ API Error details:', {
+      code: err?.Code || err?.code,
+      message: err?.Message || err?.message,
+      requestId: err?.$metadata?.requestId
     });
     
-    // Log specific timeout errors
-    if (err?.message?.includes('timeout') || err?.code === 'ETIMEDOUT') {
-      console.error('⏰ Connection timeout - check AWS SES region and network connectivity');
+    // Log specific API errors
+    if (err?.Code === 'MessageRejected') {
+      console.error('📧 Email rejected - check sender/recipient verification in AWS SES');
     }
-    if (err?.message?.includes('authentication') || err?.responseCode === 535) {
-      console.error('🔐 Authentication failed - check AWS SES credentials');
+    if (err?.Code === 'SendingPausedException') {
+      console.error('📧 Sending paused - check AWS SES account status');
     }
-    if (err?.message?.includes('verification') || err?.responseCode === 554) {
-      console.error('📧 Email not verified - verify sender email in AWS SES console');
+    if (err?.Code === 'MailFromDomainNotVerifiedException') {
+      console.error('📧 Domain not verified - verify sender domain in AWS SES');
     }
     
     throw err;
@@ -288,7 +303,7 @@ export class EmailService {
     routeData?: any
   ) {
     // Check if email is configured
-    if (!transporter || !FROM_EMAIL) {
+    if (!sesClient) {
       console.log('📧 Email not configured - skipping email notification');
       return;
     }
@@ -296,7 +311,8 @@ export class EmailService {
     const driverEmail = driver.email?.trim();
 
     console.log('📧 Email config check:', {
-      hasTransporter: !!transporter,
+      hasAPI: !!sesClient,
+      provider: emailProvider,
       fromEmail: FROM_EMAIL,
       driverEmail: driverEmail,
     });
@@ -334,7 +350,7 @@ export class EmailService {
     vehicle: Vehicle
   ) {
     // Check if email is configured
-    if (!transporter || !FROM_EMAIL) {
+    if (!sesClient) {
       console.log('📧 Email not configured - skipping trip cancellation email');
       return;
     }
@@ -365,7 +381,7 @@ export class EmailService {
     vehicle: Vehicle,
     nearbyFacilities: any[]
   ) {
-    if (!transporter || !FROM_EMAIL) {
+    if (!sesClient) {
       console.log('📧 Email not configured - skipping emergency alert');
       return;
     }
@@ -472,7 +488,7 @@ export class EmailService {
     driver: Driver,
     vehicle: Vehicle
   ) {
-    if (!transporter || !FROM_EMAIL) {
+    if (!sesClient) {
       console.log('📧 Email not configured - skipping emergency contact alert');
       return;
     }
@@ -531,28 +547,22 @@ export class EmailService {
 
   // Test email configuration
   static async testConnection() {
-    if (!transporter || !FROM_EMAIL) {
-      console.error('❌ AWS SES not configured - missing AWS_SES_USER or AWS_SES_PASSWORD');
-      return false;
-    }
-    try {
-      await transporter.verify();
-      console.log('✅ AWS SES email service is ready');
+    if (sesClient) {
+      console.log('✅ AWS SES API service is ready');
       return true;
-    } catch (error) {
-      console.error('❌ AWS SES service error:', error);
-      return false;
     }
+    console.error('❌ No email service configured');
+    return false;
   }
 
   // Send test email
   static async sendTestEmail(recipient: string, message: string) {
-    if (!transporter || !FROM_EMAIL) {
+    if (!sesClient) {
       console.log('📧 Email not configured - skipping test email');
       return;
     }
 
-    console.log(`📧 Sending test email to ${recipient}`);
+    console.log(`📧 Sending test email to ${recipient} using ${emailProvider}`);
     await sendMail({
       to: recipient,
       subject: '🧪 RideWithAlert - Test Email',
@@ -576,7 +586,7 @@ export class EmailService {
             <div class="test-box">
               <pre>${message}</pre>
             </div>
-            <p>This is a test email from RideWithAlert system.</p>
+            <p>This is a test email from RideWithAlert system using ${emailProvider}.</p>
           </div>
         </body>
         </html>
