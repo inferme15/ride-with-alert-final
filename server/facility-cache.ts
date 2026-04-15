@@ -186,7 +186,9 @@ export function cleanupCache(): void {
   const now = Date.now();
   let cleaned = 0;
   
-  for (const [key, cached] of facilityCache.entries()) {
+  // Convert to array to avoid iterator issues
+  const entries = Array.from(facilityCache.entries());
+  for (const [key, cached] of entries) {
     if (!isCacheValid(cached)) {
       facilityCache.delete(key);
       cleaned++;
@@ -206,7 +208,9 @@ export function getCacheStats(): CacheStats {
   let validEntries = 0;
   let expiredEntries = 0;
   
-  for (const cached of facilityCache.values()) {
+  // Convert to array to avoid iterator issues
+  const values = Array.from(facilityCache.values());
+  for (const cached of values) {
     if (isCacheValid(cached)) {
       validEntries++;
     } else {
