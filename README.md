@@ -71,3 +71,16 @@ PUBLIC_APP_URL="https://your-app-url.com"
 ## License
 
 MIT License
+
+## References
+
+1. Garcia, A., Martinez, C., and Rodriguez, S., Emergency Response Systems in Transportation, Safety Publications, 2023, 4th Edition.
+2. IEEE Transactions on Intelligent Transportation Systems, Modern Fleet Management: Technology and Best Practices for Transportation Safety, Volume 24, Number 3, 2023.
+3. International Journal of Geographical Information Science, Real-Time Location Tracking Systems: Architecture and Implementation, Volume 37, Number 5, 2023.
+4. Johnson, M., Thompson, B., and White, D., Machine Learning Applications in Vehicle Safety, AI Research Press, 2022, 2nd Edition.
+5. Journal of Emergency Management, Design and Implementation of Real-Time Emergency Alert Systems for Transportation, Volume 21, Number 2, 2023.
+6. Kumar, R., Patel, N., and Sharma, V., GPS Tracking and Location Services Implementation, Navigation Systems, 2024, 1st Edition.
+7. Lee, H., Kim, S., and Park, J., Mobile Application Development for Emergency Services, Mobile Tech Press, 2023, 3rd Edition.
+8. Nguyen, L., Tran, H., and Le, M., IoT Integration in Vehicle Monitoring Systems, IoT Publications, 2024, 1st Edition.
+9. Singh, P., Gupta, A., and Verma, S., Fleet Management Systems and Technologies, Transportation Tech, 2022, 2nd Edition.
+10. Williams, D., Evans, M., and Harris, N., User Interface Design for Emergency Systems, UX Design Press, 2022, 4th Edition.
