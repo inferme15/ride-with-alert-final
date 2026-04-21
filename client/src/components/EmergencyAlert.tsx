@@ -257,7 +257,7 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
     acknowledge(emergency.emergencyId, {
       onSuccess: () => {
         toast({
-          title: "False Alarm Acknowledged",
+          title: "False Emergency Acknowledged",
           description: "Trip will continue. No alerts sent to authorities.",
           variant: "default"
         });
@@ -516,7 +516,7 @@ export function EmergencyAlert({ emergency, onClose, onRealEmergency, onFalseAla
               {isPending ? "Processing..." : (
                 <>
                   <AlertOctagon className="w-5 h-5 mr-2" />
-                  False Alarm
+                  False Emergency
                 </>
               )}
             </Button>

@@ -14,13 +14,6 @@ export function generateTemporaryCredentials() {
 }
 
 
-
-
-
-
-
-
-
 export interface NearbyFacility {
   name: string;
   type: "police" | "hospital" | "fuel_station" | "service_center" | "pharmacy" | "clinic" | "fire_station";
